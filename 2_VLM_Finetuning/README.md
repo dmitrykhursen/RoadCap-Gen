@@ -1,0 +1,4 @@
+This folder focuses on fine-tuning VLMs using pseudo ground-truth QA pairs generated in the first stage (1_QAs_Generation). The baseline setup performs standard VLM fine-tuning with visual–textual supervision.
+
+Auxiliary Latent-Space Loss (Not Started):
+An extended variant incorporates an auxiliary latent-space loss, where an Encoder–Decoder model is trained to learn a compact latent representation of scene geometry from LiDAR point clouds or range images. This latent representation is used to guide VLM training, enforcing geometric consistency and improving the model’s ability to reason about spatial structure and depth-related concepts.

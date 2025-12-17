@@ -1,0 +1,1 @@
+Folder is used for generation of (pseudo GT) QAs for future VLMs finetuning
