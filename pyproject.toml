@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roadcap"
+version = "0.1.0"
+description = "VLM Fine-tuning for Road Scene Reasoning"
+dependencies = [
+    "torch",
+    "transformers",
+    #"hydra-core",
+    "wandb"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]  # Tells python to look for packages here
+include = ["src*"]
