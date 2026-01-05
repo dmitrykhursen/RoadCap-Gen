@@ -1,0 +1,5 @@
+name: "llava-v1.6-vicuna-7b"
+path: "llava-hf/llava-v1.6-vicuna-7b-hf" # The HuggingFace ID
+type: "llava"
+tokenizer_path: "llava-hf/llava-v1.6-vicuna-7b-hf"
+max_length: 2048

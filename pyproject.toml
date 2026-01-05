@@ -9,7 +9,7 @@ description = "VLM Fine-tuning for Road Scene Reasoning"
 dependencies = [
     "torch",
     "transformers",
-    #"hydra-core",
+    "hydra-core",
     "wandb"
 ]
 

@@ -1,0 +1,4 @@
+name: "road_qa"
+data_path: "data/processed/train_qa.json" # Your JSON file
+image_folder: "data/raw/images"           # Folder containing images
+task: "qa"
