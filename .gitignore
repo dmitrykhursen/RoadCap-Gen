@@ -1,0 +1,13 @@
+# --- Python & Build Metadata ---
+*.egg-info/
+build/
+dist/
+
+# --- Caches  ---
+**/__pycache__/
+*.pyc
+
+# --- Project Specifics ---
+output/
+data/
+wandb/
