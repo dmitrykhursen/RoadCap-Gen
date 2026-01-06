@@ -59,3 +59,6 @@ def main(cfg):
 
 if __name__ == "__main__":
     main()
+
+
+# source /mnt/proj1/eu-25-10/envs/roadcap-gen/bin/activate
