@@ -1,0 +1,3 @@
+# This is your custom mode with auxiliary loss
+name: "extended"
+geo_weight: 0.5  # How much the geometric loss counts
