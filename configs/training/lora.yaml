@@ -1,8 +1,21 @@
 use_lora: true
+bf16: true
 load_in_4bit: false        # Don't use QLoRA
-lora_r: 64                # Rank
-lora_alpha: 128
+lora_r: 128                # Rank
+lora_alpha: 256
 lora_dropout: 0.05
-batch_size: 4             # Adjust based on your GPU VRAM
+batch_size: 1             # Adjust based on your GPU VRAM
 learning_rate: 2e-4
+grad_accumulation: 1
 epochs: 3
+logging_steps: 10      # Log loss every 10 steps
+
+# Control what to finetune with LoRA /QLoRA
+# Options: ["language_model", "vision_model", "multi_modal_projector"]
+train_modules: ["multi_modal_projector"]  
+# HOW TO TRAIN THE PROJECTOR
+# "lora" = Freezes weights, trains adapters on linear_1/linear_2 (Efficient)
+# "full" = Unfreezes original weights (Standard LLaVA approach)
+projector_mode: "full"
+# Specific layers inside those modules to target with LoRA
+target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
