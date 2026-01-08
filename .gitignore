@@ -8,6 +8,6 @@ dist/
 *.pyc
 
 # --- Project Specifics ---
-output/
-data/
-wandb/
+output/*
+data/*
+wandb/*
