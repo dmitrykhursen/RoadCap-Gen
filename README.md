@@ -4,7 +4,34 @@ Generate QAs (and captions in the future) for driving scenes to fine-tune Vision
 
 ---
 
-## Pipeline Overview
+## 🚀 Setup & Installation
+
+Create and activate a Python virtual environment:
+
+```bash
+python3.11 -m venv roadcap-gen
+source roadcap-gen/bin/activate
+```
+
+Install project dependencies:
+
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+# pip install -e .
+```
+
+---
+
+## ▶️ Run the Project
+
+Execute the Python script using hydra config (example for lora training):
+
+```bash
+python python scripts/02_finetuning/train.py model=llava dataset=qa_dataset training=lora experiment_name=qa_train_debug
+```
+
+## Pipeline Overview (acoording to the visualization below but outdated with the code)
 
 1. **QAs_Generation**  
    Generate pseudo ground-truth question–answer pairs from driving scenes
