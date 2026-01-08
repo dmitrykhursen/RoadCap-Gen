@@ -1,37 +1,42 @@
 import torch
+from torch.nn.utils.rnn import pad_sequence
+from dataclasses import dataclass
+from typing import Any, Dict, List
 
+@dataclass
 class RoadCapCollator:
-    def __init__(self, processor):
-        self.processor = processor
-        # We need the tokenizer to know what the 'pad' token ID is
-        self.tokenizer = processor.tokenizer 
+    def __init__(self, tokenizer: Any):
+        self.tokenizer = tokenizer
 
     def __call__(self, batch):
-        images = [x['image'] for x in batch]
-        texts = [x['text'] for x in batch]
+        # 1. Stack Images 
+        pixel_values = torch.stack([item['pixel_values'] for item in batch])
+        
+        # 2. Stack Image Sizes
+        # This creates a tensor of shape (Batch_Size, 2) -> [[h, w], [h, w], ...]
+        image_sizes = torch.stack([item['image_sizes'] for item in batch])
 
-        # 1. Process Images and Text together
-        # The processor handles resizing, normalizing images, and tokenizing text
-        inputs = self.processor(
-            text=texts,
-            images=images,
-            return_tensors="pt",
-            padding=True,          # Pad to longest sequence in batch
-            truncation=True,
-            max_length=2048
+        # 3. Extract Text
+        input_ids = [item['input_ids'] for item in batch]
+        labels = [item['labels'] for item in batch]
+        
+        # 4. Dynamic Padding (Same as before)
+        input_ids_padded = pad_sequence(
+            input_ids, 
+            batch_first=True, 
+            padding_value=self.tokenizer.pad_token_id
         )
-        
-        # 2. Create Labels
-        inputs['labels'] = inputs['input_ids'].clone()
-        
-        # 3. CRITICAL FIX: Mask padding tokens
-        # We find where the input is 'pad_token', and set the label to -100
-        pad_token_id = self.tokenizer.pad_token_id
-        
-        # Create a mask: True where it is padding
-        padding_mask = inputs['input_ids'] == pad_token_id
-        
-        # Apply -100 to labels
-        inputs['labels'][padding_mask] = -100
-        
-        return inputs
+        labels_padded = pad_sequence(
+            labels, 
+            batch_first=True, 
+            padding_value=-100 
+        )
+        attention_mask = input_ids_padded.ne(self.tokenizer.pad_token_id)
+
+        return {
+            "input_ids": input_ids_padded,
+            "attention_mask": attention_mask,
+            "pixel_values": pixel_values,
+            "image_sizes": image_sizes,
+            "labels": labels_padded
+        }
