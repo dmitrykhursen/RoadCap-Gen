@@ -15,19 +15,19 @@ import transformers
 import wandb
 from omegaconf import OmegaConf
 
-# setup Python's native logging to print to stdout (Terminal)
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    datefmt="%m/%d/%Y %H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)],
-    level=logging.INFO, # Force native logger to INFO
-)
+# # setup Python's native logging to print to stdout (Terminal)
+# logging.basicConfig(
+#     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+#     datefmt="%m/%d/%Y %H:%M:%S",
+#     handlers=[logging.StreamHandler(sys.stdout)],
+#     level=logging.INFO, # Force native logger to INFO
+# )
 
-# force Hugging Face Transformers to print INFO logs
-transformers.utils.logging.set_verbosity_info()
-# only print on the main GPU (Rank 0) to avoid duplicates in distributed training
-transformers.utils.logging.enable_default_handler()
-transformers.utils.logging.enable_explicit_format()
+# # force Hugging Face Transformers to print INFO logs
+# transformers.utils.logging.set_verbosity_info()
+# # only print on the main GPU (Rank 0) to avoid duplicates in distributed training
+# transformers.utils.logging.enable_default_handler()
+# transformers.utils.logging.enable_explicit_format()
 
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="config")
