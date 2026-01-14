@@ -1,14 +1,16 @@
 use_lora: true
 bf16: true
-load_in_4bit: false        # Don't use QLoRA
-lora_r: 128                # Rank
-lora_alpha: 256
-lora_dropout: 0.05
-batch_size: 1             # Adjust based on your GPU VRAM
+# load_in_4bit: false        # don't use QLoRA
+# lora_r: 128                # Rank
+# lora_alpha: 256
+# lora_dropout: 0.05
+batch_size: 2             # Adjust based on your GPU VRAM
 learning_rate: 2e-4
-grad_accumulation: 1
+grad_accumulation: 4
+num_workers: 8
 epochs: 3
 logging_steps: 10      # Log loss every 10 steps
+grad_checkpointing: true   # Enable gradient checkpointing (saves VRAM)
 
 # Control what to finetune with LoRA /QLoRA
 # Options: ["language_model", "vision_model", "multi_modal_projector"]
