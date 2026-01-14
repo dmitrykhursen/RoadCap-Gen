@@ -7,11 +7,7 @@ def apply_peft(model, cfg):
 
     print("Applying LoRA adapters...")
 
-    # 1. Enable Gradient Checkpointing
-    if hasattr(model, "gradient_checkpointing_enable"):
-        model.gradient_checkpointing_enable()
-
-    # 2. QLoRA Preparation
+    # QLoRA Preparation
     if getattr(cfg.training, "load_in_4bit", False):
         model = prepare_model_for_kbit_training(model)
 
@@ -77,16 +73,6 @@ def apply_peft(model, cfg):
         if "multi_modal_projector" in modules_to_train and projector_mode == "full":
              if "multi_modal_projector" in name:
                  param.requires_grad = True
-
-    # if projector_mode == "lora":
-    #     model.print_trainable_parameters()
-
-    # # Print specific layer names that are trainable
-    # print("\n=== TRAINABLE LAYERS ===")
-    # for name, param in model.named_parameters():
-    #     if param.requires_grad:
-    #         print(f"✅ {name} : {param.shape}")
-    # print("========================\n")
 
     if hasattr(model, "print_trainable_parameters"):
         model.print_trainable_parameters()
