@@ -1,0 +1,18 @@
+use_lora: false
+bf16: true
+batch_size: 16             # Adjust based on your GPU VRAM
+learning_rate: 1e-3 # 2e-4 for LLM 1e-3 for MMP (projector)
+grad_accumulation: 4
+num_workers: 8
+epochs: 100
+logging_steps: 10      # Log loss every 10 steps
+grad_checkpointing: true   # Enable gradient checkpointing (saves VRAM)
+warmup_ratio: 0.03        # Warmup ratio for learning rate scheduler
+
+# Control what to finetune with LoRA /QLoRA
+# Options: ["language_model", "vision_model", "multi_modal_projector"]
+train_modules: ["multi_modal_projector"]  
+# HOW TO TRAIN THE PROJECTOR
+# "lora" = Freezes weights, trains adapters on linear_1/linear_2 (Efficient)
+# "full" = Unfreezes original weights (Standard LLaVA approach)
+projector_mode: "full"
