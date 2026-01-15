@@ -41,7 +41,7 @@ def main(cfg):
     wandb_run = wandb.init(
         project="RoadCap-Gen",      # Your Project Name
         name=cfg.experiment_name,   # Name of this specific run (e.g. "qa_test_v1")
-        config=config_dict,         # <--- THIS LOGS YOUR HYDRA CONFIG
+        config=config_dict,         # HYDRA CONFIG
         group=cfg.model.name,       # Optional: Group runs by model type
         job_type="finetune",
     )
@@ -72,7 +72,7 @@ def main(cfg):
         tokenizer=tokenizer,
         image_processor=image_processor,
         split="train",       # <--- Request Train split
-        data_usage=0.01      # <--- Train on only XX% of the training data
+        data_usage=1.0      # <--- Train on only XX% of the training data
     )
 
     # create Validation Dataset (100% of Val Split)
@@ -83,7 +83,7 @@ def main(cfg):
         tokenizer=tokenizer,
         image_processor=image_processor,
         split="val",         # <--- Request Validation split
-        data_usage=0.4       # <--- Use XX% of validation data
+        data_usage=1.0       # <--- Use XX% of validation data
     )
 
     # 5. Apply LoRA
@@ -102,13 +102,14 @@ def main(cfg):
         learning_rate=cfg.training.learning_rate,
         num_train_epochs=cfg.training.epochs,
         logging_steps=cfg.training.logging_steps,
-        logging_strategy="epoch", # or "steps"
+        logging_strategy="steps", # or "steps"
         # save_strategy="epoch",
         bf16=use_bf16,
         fp16=not use_bf16,
         dataloader_num_workers=cfg.training.num_workers,
         remove_unused_columns=False, 
         gradient_checkpointing=cfg.training.grad_checkpointing,
+        warmup_ratio=cfg.training.warmup_ratio,
 
         # evaluation / validation
         # evaluation_strategy="epoch", # Run validation at end of every epoch
@@ -164,4 +165,4 @@ if __name__ == "__main__":
 # salloc -A EU-25-10 -p qgpu --gpus-per-node 1 -t 5:00:00 --nodes 1
 
 # source /mnt/proj1/eu-25-10/envs/roadcap-gen/bin/activate
-# python scripts/02_finetuning/train.py     model=llava     dataset=qa_dataset     training=lora     experiment_name=first_qa_test
+# python scripts/02_finetuning/train.py     model=llava     dataset=qa_dataset     training=lora     experiment_name=qa_debug
