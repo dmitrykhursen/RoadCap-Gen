@@ -13,6 +13,16 @@ python3.11 -m venv roadcap-gen
 source roadcap-gen/bin/activate
 ```
 
+The project uses **Git Submodules** to integrate external tools like DriveLM. You must clone recursively:
+
+```bash
+# Option A: Cloning for the first time
+git clone --recurse-submodules [https://github.com/dmitrykhursen/RoadCap-Gen.git](https://github.com/dmitrykhursen/RoadCap-Gen.git)
+cd RoadCap-Gen
+
+# Option B: If you already cloned normally
+git submodule update --init --recursive
+
 Install project dependencies:
 
 ```bash
