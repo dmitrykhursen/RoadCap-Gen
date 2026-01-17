@@ -1,0 +1,5 @@
+name: "drivelm"
+data_path: "/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/external/DriveLM/challenge/data/v1_1_train_conv2llama.json"
+image_folder: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/train_val_samples"      
+task: "vqa"
+images_per_frame: "6"
