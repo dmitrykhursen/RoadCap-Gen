@@ -5,7 +5,7 @@ from src.models.builder import build_model
 from src.training import trainer
 from src.training.peft_utils import apply_peft
 from src.training.trainer import RoadCapTrainer
-from src.data.dataset import RoadCapDataset
+from src.data.dataset_builder import build_dataset
 from src.data.collator import RoadCapCollator
 from transformers import AutoTokenizer, AutoImageProcessor, AutoProcessor
 
@@ -56,37 +56,41 @@ def main(cfg):
         tokenizer.pad_token = tokenizer.unk_token if tokenizer.unk_token else tokenizer.eos_token
     
     image_processor = AutoImageProcessor.from_pretrained(cfg.model.path, trust_remote_code=True)
-    # print("image_processor:", image_processor)
+    if hasattr(image_processor, "image_grid_pinpoints"):
+        custom_resolution = (672, 1008) # define DriveLM 2x3 grid resolution: (Height=672, Width=1008)
+        image_processor.image_grid_pinpoints = list(image_processor.image_grid_pinpoints) + [custom_resolution]
 
     # 2. Build Model
     print(f"Building Model: {cfg.model.name}")
     model = build_model(cfg)  
+
+    if hasattr(model.config, "image_grid_pinpoints"):
+        custom_resolution = (672, 1008) # define DriveLM 2x3 grid resolution: (Height=672, Width=1008)
+        model.config.image_grid_pinpoints = list(model.config.image_grid_pinpoints) + [custom_resolution]
         
     
     print(f"Loading Datasets from {cfg.dataset.data_path}...")
-    # create Training Dataset (e.g., 10% of Train Split)
+    print(f"Loading Datasets: {cfg.dataset.name}")
+    
     print("--- Loading Training Set ---")
-    train_dataset = RoadCapDataset(
-        data_path=cfg.dataset.data_path,
-        image_folder=cfg.dataset.image_folder,
+    train_dataset = build_dataset(
+        cfg=cfg,
         tokenizer=tokenizer,
         image_processor=image_processor,
-        split="train",       # <--- Request Train split
-        data_usage=1.0      # <--- Train on only XX% of the training data
+        split="train",
+        data_usage=cfg.training.data_usage
     )
 
-    # create Validation Dataset (100% of Val Split)
     print("--- Loading Validation Set ---")
-    eval_dataset = RoadCapDataset(
-        data_path=cfg.dataset.data_path,
-        image_folder=cfg.dataset.image_folder,
+    eval_dataset = build_dataset(
+        cfg=cfg,
         tokenizer=tokenizer,
         image_processor=image_processor,
-        split="val",         # <--- Request Validation split
-        data_usage=1.0       # <--- Use XX% of validation data
+        split="val",
+        data_usage=cfg.training.data_usage
     )
 
-    # 5. Apply LoRA
+    # 5. potentialy apply LoRA
     model = apply_peft(model, cfg)
 
     # 6. Training Arguments & Trainer
@@ -102,6 +106,8 @@ def main(cfg):
         learning_rate=cfg.training.learning_rate,
         num_train_epochs=cfg.training.epochs,
         logging_steps=cfg.training.logging_steps,
+        # logging_steps=50,
+        # logging_strategy="epoch", 
         logging_strategy="steps", # or "steps"
         # save_strategy="epoch",
         bf16=use_bf16,
@@ -135,6 +141,9 @@ def main(cfg):
 
     processor = AutoProcessor.from_pretrained(cfg.model.path)
     processor.tokenizer.padding_side = "right" # during training, one always uses padding on the right
+    if hasattr(image_processor, "image_grid_pinpoints"):
+        processor.image_processor.image_grid_pinpoints = image_processor.image_grid_pinpoints
+
     collator = RoadCapCollator(processor=processor)
     
     trainer = RoadCapTrainer(
@@ -147,10 +156,10 @@ def main(cfg):
     )
 
     print("📊 Running Epoch 0 (Baseline) Evaluation / Validation...")
-    initial_metrics = trainer.evaluate()
-    initial_metrics["epoch"] = 0. # force 'epoch' to be 0.0
-    trainer.log(initial_metrics) # log to W&B (and console)
-    print(f"Epoch 0 Metrics: {initial_metrics}")
+    # initial_metrics = trainer.evaluate()
+    # initial_metrics["epoch"] = 0. # force 'epoch' to be 0.0
+    # trainer.log(initial_metrics) # log to W&B (and console)
+    # print(f"Epoch 0 Metrics: {initial_metrics}")
 
 
     print("Starting Training...")
@@ -165,4 +174,5 @@ if __name__ == "__main__":
 # salloc -A EU-25-10 -p qgpu --gpus-per-node 1 -t 5:00:00 --nodes 1
 
 # source /mnt/proj1/eu-25-10/envs/roadcap-gen/bin/activate
-# python scripts/02_finetuning/train.py     model=llava     dataset=qa_dataset     training=lora     experiment_name=qa_debug
+# python scripts/02_finetuning/train.py     model=llava     dataset=qa_dataset     training=lora              experiment_name=qa_debug
+# python scripts/02_finetuning/train.py     model=llava     dataset=drivelm        training=full_finetune     experiment_name=debug_llava_drivelm_fullfinetune

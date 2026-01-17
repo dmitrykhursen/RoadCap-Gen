@@ -18,10 +18,15 @@ cd /mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/
 
 # Define variables
 MODEL="llava"
-DATASET="vqa_valeo_karolina"
-TRAINING="lora"
+# DATASET="vqa_valeo_karolina"
+DATASET="drivelm"
+TRAINING="full_finetune"
 
-experiment_name="karolina_srun_llava_fullfinetune_MMP_Valeo_3.1"
+# ----- CHANGE EXPERIMENT NAME FOR EACH RUN -----
+# experiment_name="karolina_srun_llava_fullfinetune_MMP_Valeo_3.1"
+experiment_name="karolina_srun_llava_fullfinetune_MMP_DriveLM-data_usage-0.15"
+
+# -----------------------------------------------
 
 # Run the command
 srun python scripts/02_finetuning/train.py \
