@@ -2,11 +2,10 @@
 import json
 import torch
 from .frontcam_dataset import FRONTCAMDataset
-import random  # <--- Import this
-from .frontcam_dataset import FRONTCAMDataset
+import random
 
 
-class RoadCapDataset(FRONTCAMDataset):
+class RoadVQADataset(FRONTCAMDataset):
     def __init__(
         self, 
         data_path, 

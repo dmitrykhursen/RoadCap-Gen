@@ -8,7 +8,8 @@ class RoadCapCollator:
     def __init__(self, processor):
         self.processor = processor  # this includes tokenizer + image encoder
         self.tokenizer = processor.tokenizer
-        self.MAX_LENGTH = 2048
+        # self.MAX_LENGTH = 2048
+        self.MAX_LENGTH = 8192
 
     def __call__(self, examples: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
 
