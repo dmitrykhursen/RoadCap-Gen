@@ -1,0 +1,40 @@
+# configs/inference/drivelm.yaml
+
+# input settings are set in configs/dataset/drivelm.yaml
+
+# output settings
+output_dir: "output/inference"
+output_file: "drivelm_pred_forHF.json"
+
+# --- MODEL LOADING STRATEGY ---
+# Options: "pretrained" (baseline), "fullfinetune", "adapter" (PEFT)
+load_mode: "pretrained" 
+checkpoint_model: null # for pretrained cckpt is taken from  configs/model/{model}.yaml
+checkpoint_adapter: null
+
+# # FF_MMP on DriveLM data
+# load_mode: "fullfinetune" 
+# checkpoint_model: "output/llava-v1.6-mistral-7b/karolina_srun_llava_fullfinetune_MMP_DriveLM-data_usage-0.3/checkpoint-555"
+# checkpoint_adapter: null
+
+# # FF_MMP on Valeo data
+# load_mode: "fullfinetune" 
+# checkpoint_model: "output/llava-v1.6-mistral-7b/karolina_srun_llava_fullfinetune_MMP_Valeo_2.1/checkpoint-3432"
+# checkpoint_adapter: null
+
+tokenizer_path: "llava-hf/llava-v1.6-mistral-7b-hf"
+
+num_workers: 4
+batch_size: 8
+
+# Generation settings
+generation:
+  max_new_tokens: 512 #4096
+  temperature: 0.2
+  top_p: 0.1
+  do_sample: true
+  use_cache: true
+
+# # Data settings for split test for local testing
+# split: "test" 
+# batch_size: 1

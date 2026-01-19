@@ -3,3 +3,4 @@ path: "llava-hf/llava-v1.6-mistral-7b-hf" # The HuggingFace ID
 type: "llava"
 tokenizer_path: "llava-hf/llava-v1.6-mistral-7b-hf"
 max_length: 2048
+dtype: "bf16"

@@ -5,7 +5,8 @@
 defaults:
   - model: llava_1_6           # Looks for configs/model/llava_1_6.yaml
   - dataset: qa_dataset        # Looks for configs/dataset/qa_dataset.yaml
-  - training: lora             # Looks for configs/training/lora.yaml
+  - training: null            
+  - inference: null  
   - mode: simple               # Looks for configs/mode/simple.yaml
   - _self_                     # Required by Hydra to allow overrides below
 
