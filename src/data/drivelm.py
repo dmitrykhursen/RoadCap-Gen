@@ -30,8 +30,9 @@ class DriveLMDataset(Dataset):
         
         # 2. SPLITTING LOGIC (Train / Val / Test)
         # Deterministic Shuffle
-        random.seed(seed)
-        random.shuffle(valid_samples)
+        if split in ["train", "val", "test"]:
+            random.seed(seed)
+            random.shuffle(valid_samples)
         
         total = len(valid_samples)
         train_end = int(total * split_ratio[0])
@@ -44,6 +45,8 @@ class DriveLMDataset(Dataset):
             self.samples = valid_samples[train_end:val_end]
         elif split == "test":
             self.samples = valid_samples[val_end:]
+        elif split == "all_data":
+            self.samples = valid_samples
         else:
             raise ValueError(f"Unknown split: {split}")
 
