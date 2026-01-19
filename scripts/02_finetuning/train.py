@@ -171,7 +171,7 @@ def main(cfg):
 if __name__ == "__main__":
     main()
 
-# salloc -A EU-25-10 -p qgpu --gpus-per-node 1 -t 5:00:00 --nodes 1
+# salloc -A EU-25-10 -p qgpu_exp --gpus-per-node 1 -t 5:00:00 --nodes 1
 
 # source /mnt/proj1/eu-25-10/envs/roadcap-gen/bin/activate
 # python scripts/02_finetuning/train.py     model=llava     dataset=qa_dataset     training=lora              experiment_name=qa_debug
