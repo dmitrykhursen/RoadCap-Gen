@@ -24,11 +24,6 @@ class RoadVQADataset(FRONTCAMDataset):
         self.tokenizer = tokenizer
         self.image_processor = image_processor
         self.model_style = model_style
-        
-        if hasattr(self.image_processor, "image_grid_pinpoints"):
-             self.image_processor.image_grid_pinpoints = None
-        self.image_processor.size = {"height": 336, "width": 336}
-        self.image_processor.crop_size = {"height": 336, "width": 336}
 
         # 1. Load & Flatten JSON (Load ALL data first)
         raw_data = json.load(open(data_path))

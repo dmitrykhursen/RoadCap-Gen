@@ -4,13 +4,14 @@ from src.data.drivelm import DriveLMDataset
 def build_dataset(cfg, tokenizer, image_processor, split="train", data_usage=1.0):
     dataset_name = cfg.dataset.name.lower()
     
-    if dataset_name == "roadvqa":
+    if dataset_name == "road_vqa":
         return RoadVQADataset(
             data_path=cfg.dataset.data_path,
             image_folder=cfg.dataset.image_folder,
             tokenizer=tokenizer,
             image_processor=image_processor,
             split=split,
+            split_ratio=(0.7, 0.3, 0.0), # have val set as test set as well for local DriveLM evaluation/benchmark
             data_usage=data_usage
         )
         
@@ -21,6 +22,7 @@ def build_dataset(cfg, tokenizer, image_processor, split="train", data_usage=1.0
             tokenizer=tokenizer,
             image_processor=image_processor,
             split=split,
+            split_ratio=(0.7, 0.3, 0.0), # have val set as test set as well for local DriveLM evaluation/benchmark
             data_usage=data_usage
         )
         
