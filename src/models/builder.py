@@ -5,7 +5,8 @@ import torch
 
 def build_model(cfg):
 
-    if getattr(cfg.model.dtype, "bf16", False):
+    print(f"build model - model dtype: {cfg.model.dtype=}")
+    if cfg.model.dtype == "bf16":
         compute_dtype = torch.bfloat16
         print("Model loading with: bfloat16 (Best for A100)")
     else:
@@ -13,17 +14,8 @@ def build_model(cfg):
         print("Model loading with: float16")
     
     if cfg.model.type == "llava":
-        
-        # Load Model (handling 4-bit loading happens in peft_utils usually, 
-        # but for simplicity we load full here, or let Trainer handle it)
-
-        # model = RoadCapLLaVA.from_pretrained(
-        #     cfg.model.path,
-        #     dtype=compute_dtype,
-        # )
-        print(f"Model Load Mode: {getattr(cfg.inference, 'load_mode', 'pretrained')}")
-
-        if cfg.inference is None or cfg.inference.load_mode == "pretrained":
+        inference_cfg = cfg.get("inference") 
+        if inference_cfg is None or inference_cfg.get("load_mode") == "pretrained":
             model = RoadCapLLaVA.from_pretrained(
                 cfg.model.path,
                 dtype=compute_dtype,
