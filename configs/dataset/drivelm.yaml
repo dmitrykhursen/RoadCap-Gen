@@ -1,10 +1,11 @@
 name: "drivelm"
-# # train + val set
-# data_path: "/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/external/DriveLM/challenge/data/v1_1_train_conv2llama.json"
-# image_folder: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/train_val_samples"  
+# train + val set
+data_path: "/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/external/DriveLM/challenge/data/v1_1_train_conv2llama.json"
+image_folder: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/train_val_samples"  
 
-# test (HF serever) set
-data_path: "/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/external/DriveLM/challenge/data/v1_1_test_nus_q_only_conv2llama.json"
-image_folder: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/test_data" 
+# # test (HF serever) set
+# data_path: "/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/external/DriveLM/challenge/data/v1_1_test_nus_q_only_conv2llama.json"
+# image_folder: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/test_data" 
+
 task: "vqa"
 images_per_frame: "6"

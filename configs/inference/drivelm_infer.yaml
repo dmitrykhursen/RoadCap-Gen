@@ -26,6 +26,10 @@ tokenizer_path: "llava-hf/llava-v1.6-mistral-7b-hf"
 
 num_workers: 4
 batch_size: 8
+split: "val" # for local evaluation (10% val data) (we have Qs and gt As)
+# split: "test" # for local testing (10% test data) (we have Qs and gt As)
+# split: "all_data" # for HF private test server (we have only questions, no gt answers)
+
 
 # Generation settings
 generation:

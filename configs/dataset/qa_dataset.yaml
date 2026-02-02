@@ -1,4 +1,4 @@
-name: "road_qa"
+name: "road_vqa"
 data_path: "data/processed/QA_qwen_non_thinking_5_Qs.json"
 image_folder: "/home/l-dkhursen/datasets/FRONT_CAM_zipped/20250527/21/2024-11-27-10-28-35/camera1.zip"           # Folder containing images
 task: "vqa"
