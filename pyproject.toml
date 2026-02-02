@@ -15,4 +15,4 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]  # Tells python to look for packages here
-include = ["src*"]
+include = ["src*", "external*"]
