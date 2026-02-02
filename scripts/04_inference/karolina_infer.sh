@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=finetune_llava_valeo
+#SBATCH --job-name=infer_llava_valeo
 #SBATCH --account=EU-25-10
 #SBATCH --time=1:00:00 # Time limit for running
 #SBATCH --partition=qgpu_exp
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --gpus=1
+#SBATCH --gpus=6
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=dmytro.khursenko@valeo.com
 #SBATCH --output=logs/%x_%j.out
@@ -27,10 +27,10 @@ MODEL="llava"
 # DATASET="vqa_valeo_karolina"
 DATASET="drivelm"
 INFERENCE="drivelm_infer"
-GPUS=1
+GPUS=6
 
 # ----- CHANGE EXPERIMENT NAME FOR EACH RUN -----
-experiment_name="karolina_torchrun_llava_pretrained_DriveLM_infer_data0.03_gpu1_bs8_nw4"
+experiment_name="latest_karolina_torchrun_local_val_llava_pretrained_infer_data1_0_gpu6_bs8_nw4"
 
 # experiment_name="karolina_torchrun_llava_FFmmp_DriveLM_infer_data1.0_gpu1_bs8_nw4"
 
