@@ -4,5 +4,5 @@ diffusers>=0.20.0
 Pillow>=10.0.0
 matplotlib>=3.8.0
 numpy>=1.26.0
-git+https://github.com/ByteDance-Seed/depth-anything-3.git@main
+# git+https://github.com/ByteDance-Seed/depth-anything-3.git@main
 git+https://github.com/nerfstudio-project/gsplat.git@0b4dddf04cb687367602c01196913cde6a743d70
