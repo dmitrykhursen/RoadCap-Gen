@@ -1,12 +1,11 @@
 import os
 import sys
-from pathlib import Path
-
 import argparse
 import numpy as np
-from PIL import Image
-import matplotlib.pyplot as plt
+from PIL import Image, UnidentifiedImageError
 from tqdm import tqdm
+from pathlib import Path
+import matplotlib.pyplot as plt
 
 import torch
 import torchvision.transforms as T
@@ -76,17 +75,33 @@ for i in tqdm(range(0, len(dset), args.bsize)):
     batch_paths = dset[i:i+args.bsize]
     
     images = []
+    valid_paths = []
     for img_path in batch_paths:
-        # Depth inference
-        prediction = model.inference([img_path], export_dir=None, export_format="npz")
-        depth = prediction.depth[0]
+        out_file = Path(output_folder) / (Path(img_path).stem + ".pt")
+        # Skip if already processed
+        if out_file.exists():
+            continue
 
-        # Normalize & convert to RGB
-        depth_vis = (depth - depth.min()) / (depth.max() - depth.min())
-        depth_vis_rgb = (plt.cm.plasma((depth_vis * 255).astype(np.uint8))[:, :, :3] * 255).astype(np.uint8)
-        depth_rgb_img = Image.fromarray(depth_vis_rgb)
+        try:
+            # Depth inference
+            prediction = model.inference([img_path], export_dir=None, export_format="npz")
+            depth = prediction.depth[0]
+
+            # Normalize & convert to RGB
+            depth_vis = (depth - depth.min()) / (depth.max() - depth.min())
+            depth_vis_rgb = (plt.cm.plasma((depth_vis * 255).astype(np.uint8))[:, :, :3] * 255).astype(np.uint8)
+            depth_rgb_img = Image.fromarray(depth_vis_rgb)
+
+        except (UnidentifiedImageError, OSError, ValueError) as e:
+            print(f"⚠️ Skipping corrupted image: {img_path} ({e})")
+            continue
+
         images.append(transform(depth_rgb_img))
+        valid_paths.append(img_path)
 
+    # If nothing valid in this batch, continue
+    if len(images) == 0:
+        continue
     # Stack batch
     x = torch.stack(images, dim=0).cuda().half()  # [B, C, H, W]
 
@@ -95,7 +110,7 @@ for i in tqdm(range(0, len(dset), args.bsize)):
         latents = vae.encode(x).latent_dist.sample() * vae.config.scaling_factor
 
     # Save latents individually
-    for j, img_path in enumerate(batch_paths):
+    for j, img_path in enumerate(valid_paths):
         fname = Path(output_folder) / (Path(img_path).stem + ".pt")
         torch.save(latents[j].cpu(), fname)
 
@@ -124,3 +139,16 @@ for i in tqdm(range(0, len(dset), args.bsize)):
 
 
 # python depth_emb_extract.py --input_folder="/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/train_val_samples/" --output_folder="/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/train_val_sample_depth_emb/" --hf_cache="/scratch/project/eu-25-50/huggingface_cache/"
+# python depth_emb_extract.py --input_folder="/scratch/project/eu-25-10/datasets/nuScenes/samples_grouped/CAM_BACK/" --output_folder="/mnt/proj1/eu-25-10/datasets/NuScenes/sampled_grouped/CAM_BACK/" --hf_cache="/scratch/project/eu-25-50/huggingface_cache/"
+# python depth_emb_extract.py --input_folder="/scratch/project/eu-25-10/datasets/nuScenes/samples_grouped/CAM_BACK_LEFT/" --output_folder="/mnt/proj1/eu-25-10/datasets/NuScenes/sampled_grouped/CAM_BACK_LEFT/" --hf_cache="/scratch/project/eu-25-50/huggingface_cache/"
+# python depth_emb_extract.py --input_folder="/scratch/project/eu-25-10/datasets/nuScenes/samples_grouped/CAM_BACK_RIGHT/" --output_folder="/mnt/proj1/eu-25-10/datasets/NuScenes/sampled_grouped/CAM_BACK_RIGHT/" --hf_cache="/scratch/project/eu-25-50/huggingface_cache/"
+# python depth_emb_extract.py --input_folder="/scratch/project/eu-25-10/datasets/nuScenes/samples_grouped/CAM_FRONT/" --output_folder="/mnt/proj1/eu-25-10/datasets/NuScenes/sampled_grouped/CAM_FRONT/" --hf_cache="/scratch/project/eu-25-50/huggingface_cache/"
+# python depth_emb_extract.py --input_folder="/scratch/project/eu-25-10/datasets/nuScenes/samples_grouped/CAM_FRONT_LEFT/" --output_folder="/mnt/proj1/eu-25-10/datasets/NuScenes/sampled_grouped/CAM_FRONT_LEFT/" --hf_cache="/scratch/project/eu-25-50/huggingface_cache/"
+# python depth_emb_extract.py --input_folder="/scratch/project/eu-25-10/datasets/nuScenes/samples_grouped/CAM_FRONT_RIGHT/" --output_folder="/mnt/proj1/eu-25-10/datasets/NuScenes/sampled_grouped/CAM_FRONT_RIGHT/" --hf_cache="/scratch/project/eu-25-50/huggingface_cache/"
+
+
+#srun -A EU-25-10 -p qgpu --gpus-per-node=1 --nodes=1 -t 8:00:00 \
+# python depth_emb_extract.py \
+#   --input_folder="/scratch/project/eu-25-10/datasets/nuScenes/samples_grouped/CAM_BACK/" \
+#   --output_folder="/mnt/proj1/eu-25-10/datasets/NuScenes/sampled_grouped/CAM_BACK/" \
+#   --hf_cache="/scratch/project/eu-25-50/huggingface_cache/"
