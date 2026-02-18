@@ -58,6 +58,7 @@ from torch.utils.data import DataLoader
 from pathlib import Path
 from typing import List
 from src.data.nuscenes import NuscenesDataset
+from src.data.frontcam_dataset import FRONTCAMDataset
 import torchvision.transforms as T
 
 
@@ -90,9 +91,9 @@ def list_drive_lm_scenes(root_dir: str) -> List[str]:
 
 
 def list_all_zip_files(root_dir: str) -> List[str]:
-    # Lists all zip files in the given directory and its subdirectories.
+    # Lists all CAMERA zip files in the given directory and its subdirectories.
     root_path = Path(root_dir)
-    zip_files = [str(p) for p in root_path.rglob("*.zip")]
+    zip_files = [str(p) for p in root_path.rglob("*.zip") if "camera" in str(p).lower()]
     return zip_files
 
 def encode_binary_mask(mask: np.ndarray):
@@ -344,20 +345,13 @@ def main():
         T.Lambda(lambda img: T.functional.pad(img, (0, (32 - img.shape[1] % 32) % 32, 32 - (img.shape[2] % 32), 0))),  # Pad to have H and W divisible by 32
         T.Lambda(lambda x: x.permute(0, 1, 2)),
     ])
-    
-
-    # if os.path.isdir(args.img):
-    #     # process a directory of zip files
-    #     zip_files = list_all_zip_files(args.img)
-    # else:
-    #     # process a single zip file
-    #     zip_files = [args.img]
-    
-    # print(f"zip files: {zip_files}")
 
     # --- 1. GET ALL SCENE FOLDERS ---
     if os.path.isdir(args.img):
-        all_scene_folders = list_drive_lm_scenes(args.img)
+        if args.dataset == "drivelm":
+            all_scene_folders = list_drive_lm_scenes(args.img)
+        elif args.dataset == "valeo":
+            all_scene_folders = list_all_zip_files(args.img)
     else:
         # Single folder case
         all_scene_folders = [args.img]
@@ -396,74 +390,50 @@ def main():
             "results": []
         }
 
-        # output_dir = get_output_dir(zip_path, args.out_dir)
-        output_dir = get_output_dir_from_nuscenes_folder(scene_path, args.out_dir, args.img)
+        if args.dataset == "valeo":
+            output_dir = get_output_dir(scene_path, args.out_dir)
+            # output_dir = get_output_dir_from_nuscenes_folder(scene_path, args.out_dir, args.img)#args.out_dir
+        elif args.dataset == "drivelm":
+            output_dir = get_output_dir_from_nuscenes_folder(scene_path, args.out_dir, args.img)
 
         print(f"{output_dir=}")
 
-        # 1. Count Input Images
-        # We already scanned this in dataset init, but let's do a quick count to be sure
-        valid_exts = {'.jpg', '.jpeg', '.png'}
-        input_count = sum(1 for f in os.listdir(scene_path) if os.path.splitext(f)[1].lower() in valid_exts)
-        
-        # 2. Count Output Files
-        is_complete = False
-        output_count = None
-        
-        if args.show:
-            # Mode: Visualization (--show) -> Check 'vis/*.png'
-            vis_dir = output_dir / "vis"
-            if vis_dir.exists():
-                is_complete = True
-
-                output_count = len(list(vis_dir.glob("*.png")))
-                # if output_count == input_count:
-                #     is_complete = True
-        else:
-            # Mode: Metadata (JSON) -> Check '*.json'
-            output_count = len(list(output_dir.glob("*.json")))
-            # print("output_dir.glob(*.json): ", list(output_dir.glob("*.json")))
-            # print(f"{output_count=}")
-            # print(f"{input_count=}")
-            # if output_count == input_count:
-            #     is_complete = True
-            if output_dir.exists():
-                is_complete = True
-
-
-        # 3. Decision
-        if is_complete:
-            print(f"⏩ [{iz+1}/{total_scenes}] Skipping complete folder ({input_count}/{output_count} processed files): {output_dir}")
-            continue
-        else:
-            print(f"🔄 [{iz+1}/{total_scenes}] Incomplete ({input_count}/{output_count} processed). Resuming: {scene_path}")
-
-        # # if output folder exists then this folder was processed already before, so skip it
-        # if output_dir.exists() and not args.overwrite:
-        #     json_files_exist = list(output_dir.glob("*.json"))
-        #     vis_dir = output_dir / "vis"
-
-        #     if json_files_exist and not args.show:
-        #         print(f"+ + + [{iz+1}/{len(all_scene_folders)}] Output folder already exists, args.overwrite is False and JSON files found, so skip it: {output_dir} + + +")
-        #         continue
-        #     elif args.show & vis_dir.exists():
-        #         existing_vis_imgs = list(vis_dir.glob("*.png"))
-        #         if len(existing_vis_imgs) > 0:
-        #             print(f"+ + + [{iz+1}/{len(all_scene_folders)}] Output VIS folder already exists, args.overwrite is False and JSON files found, so skip it: {output_dir} + + +")
-        #             continue
-        # else:
-        #     print(f"= = = = = [{iz+1}/{len(all_scene_folders)}] Processing scene folder: {scene_path} = = = = = =")
-
+        # 1. Initialize Dataset First
         dataset = None
         if args.dataset == "valeo":
-            pass
-            # TODO: update this
+            dataset = FRONTCAMDataset(image_folder=scene_path, transform=transform) 
             # dataset = PONELoader(zip_file_path=zip_path, transform=transform, file_extension="jpg", sample_per_zipfile=1)
         elif args.dataset == "drivelm":
             dataset = NuscenesDataset(image_folder=scene_path, transform=transform)
+
+        # 2. Get Input Count from Dataset instead of os.listdir
+        input_count = len(dataset)
         
+        # # Define output directory
+        # output_dir = get_output_dir_from_nuscenes_folder(scene_path, args.out_dir, args.img)
+        
+        # 3. Decision Logic (Check if already processed)
+        is_complete = False
+        output_count = 0
+        print(f"Checking output directory: {output_dir}, exists: {output_dir.exists()}, glob(*.json): {len(list(output_dir.glob('*.json'))) if output_dir.exists() else 'None'}")
+        if output_dir.exists():
+            if args.show:
+                output_count = len(list((output_dir / "vis").glob("*.png")))
+            else:
+                output_count = len(list(output_dir.glob("*.json")))
+                # is_complete = True # if just folder exists, than it was processed
+            
+            if output_count >= input_count and not args.overwrite:
+                is_complete = True
+
+        if is_complete:
+            print(f"⏩ [{iz+1}/{total_scenes}] Skipping: {output_dir} (processed {output_count} from {input_count}) \n - - - - - "*3)
+            continue
+        else:
+            print(f"🚀 [{iz+1}/{total_scenes}] Processing: {output_dir} (processed {output_count} from {input_count})")
+
+        # 4. Process Dataloader
         dataloader = DataLoader(dataset, batch_size=args.bs, shuffle=False, collate_fn=safe_collate)
-        # print(f"dataloader len: {len(dataloader)}")
 
         for data in tqdm(dataloader):
             if data is None or data.get('img') is None:
@@ -654,5 +624,9 @@ if __name__ == '__main__':
 # cd /mnt/proj1/eu-25-10/dmytro/RoadCap-Gen
 
 # python scripts/00_data_prep/extract_metadata.py --img /mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/train_val_samples_grouped/ --checkpoint external/models/YOLOv11/best.pt --segment-ckpt external/models/SAM/sam_vit_h_4b8939.pth --use-tracking --bs=1 --out-dir="output/drivelm_yolo/" --dataset="drivelm" --fast-reid-config external/fast_reid/configs/MOT17/sbs_S50.yml --fast-reid-weights external/models/Tracker/mot17_sbs_S50.pth
-[]
+
+# nuscenes datat to process
 # python scripts/00_data_prep/extract_metadata.py --img /scratch/project/eu-25-10/datasets/nuScenes/samples_grouped --checkpoint external/models/YOLOv11/best.pt --segment-ckpt external/models/SAM/sam_vit_h_4b8939.pth --use-tracking --bs=1 --out-dir="/mnt/proj1/eu-25-10/datasets/nuScenes_metadata/tmp_yolo" --dataset="drivelm" --fast-reid-config external/fast_reid/configs/MOT17/sbs_S50.yml --fast-reid-weights external/models/Tracker/mot17_sbs_S50.pth
+
+# valeo data to process
+# python scripts/00_data_prep/extract_metadata.py --img /scratch/project/eu-25-10/datasets/FRONT_CAM_zipped/20250527/18 --checkpoint external/models/YOLOv11/best.pt --segment-ckpt external/models/SAM/sam_vit_h_4b8939.pth --use-tracking --bs=1 --out-dir=/scratch/project/eu-25-10/datasets/FRONT_CAM_zipped_metadata/YOLOv11_1/ --dataset="valeo" --fast-reid-config external/fast_reid/configs/MOT17/sbs_S50.yml --fast-reid-weights external/models/Tracker/mot17_sbs_S50.pth
