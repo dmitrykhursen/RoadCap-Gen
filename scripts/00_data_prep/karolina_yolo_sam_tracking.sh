@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#SBATCH --job-name=yolov11_sam_track_nuscenesOrig_train_val_show
+#SBATCH --job-name=yolov11_sam_track_valeo_22
 #SBATCH --account=EU-25-10
-#SBATCH --time=20:00:00 # Time limit for running
+#SBATCH --time=47:00:00 # Time limit for running
 #SBATCH --partition=qgpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -24,8 +24,14 @@ cd /mnt/proj1/eu-25-10/dmytro/RoadCap-Gen
 # OUTPUT_DIR="output/nuscenes_test_metadata/"
 
 # nuScenes v1.0 
-FOLDER_with_IMGS="/scratch/project/eu-25-10/datasets/nuScenes/samples_grouped"
-OUTPUT_DIR="/mnt/proj1/eu-25-10/datasets/nuScenes_metadata/"
+# FOLDER_with_IMGS="/scratch/project/eu-25-10/datasets/nuScenes/samples_grouped"
+# OUTPUT_DIR="/mnt/proj1/eu-25-10/datasets/nuScenes_metadata/"
+# DATASET="drivelm"
+
+# valeo data
+FOLDER_with_IMGS="/scratch/project/eu-25-10/datasets/FRONT_CAM_zipped/20250527/22"
+OUTPUT_DIR="/scratch/project/eu-25-10/datasets/FRONT_CAM_zipped_metadata/YOLOv11_1/"
+DATASET="valeo"
 
 
 YOLOv11_CKPT="external/models/YOLOv11/best.pt"
@@ -33,7 +39,6 @@ SAM_CKPT="external/models/SAM/sam_vit_h_4b8939.pth"
 TRACKER_CKPT="external/models/Tracker/mot17_sbs_S50.pth"
 FAST_REID_CFG="external/fast_reid/configs/MOT17/sbs_S50.yml"
 BATCH_SIZE=1
-DATASET="drivelm"
 
 # Run the command
 srun python scripts/00_data_prep/extract_metadata.py \
@@ -47,9 +52,9 @@ srun python scripts/00_data_prep/extract_metadata.py \
     --fast-reid-weights $TRACKER_CKPT \
     --use-tracking \
     --use-sam \
-    --show
+    # --show
 
 # cd /mnt/proj1/eu-25-10/dmytro/RoadCap-Gen
-# sbatch scripts/00_data_prep/karolina_yolo_sam_tracking.sh
+# sbatch /mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/scripts/00_data_prep/karolina_yolo_sam_tracking.sh
 
 # for i in {1..30}; do sbatch scripts/00_data_prep/karolina_yolo_sam_tracking.sh; sleep 7; done
