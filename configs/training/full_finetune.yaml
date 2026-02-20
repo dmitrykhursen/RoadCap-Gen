@@ -5,11 +5,11 @@ learning_rate: 1e-3 # 2e-4 for LLM 1e-3 for MMP (projector)
 grad_accumulation: 16
 num_workers: 8
 epochs: 10
-logging_steps: 50      # Log loss every 100 steps
+logging_steps: 10      # Log loss every 10 steps
 grad_checkpointing: true   # Enable gradient checkpointing (saves VRAM)
 warmup_ratio: 0.03        # Warmup ratio for learning rate scheduler
 data_usage: 1.0        # Use a fraction of the dataset for quicker experiments (1.0 = full dataset)
-# data_usage: 0.01        # for fast debug run
+# data_usage: 0.05        # for fast debug run
 
 
 # Control what to finetune with LoRA /QLoRA

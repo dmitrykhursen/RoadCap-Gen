@@ -1,5 +1,4 @@
 import torch
-from torch.nn.utils.rnn import pad_sequence
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
@@ -8,35 +7,43 @@ class RoadCapCollator:
     def __init__(self, processor):
         self.processor = processor  # this includes tokenizer + image encoder
         self.tokenizer = processor.tokenizer
-        # self.MAX_LENGTH = 2048
         self.MAX_LENGTH = 8192
 
-    def __call__(self, examples: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
+    def __call__(self, examples: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         images = []
         text_prompts = []
+        
+        # 1. Initialize metadata lists
+        img_paths = []
+        questions = []
+        tags = []
 
-        # 1. Build prompts + collect images
+        # 2. Build prompts + collect images and metadata
         for ex in examples:
-            image = ex["image"] if "image" in ex else None
-            gt = ex["answer"] if "answer" in ex else ex["labels"].tolist()
-
-            if isinstance(image, list):  # ensure 1 image
+            # Handle image
+            image = ex.get("image")
+            if isinstance(image, list):  
                 image = image[0]
             images.append(image)
+
+            # Extract metadata (with safe fallbacks)
+            img_paths.append(ex.get("img_path", "unknown"))
+            questions.append(ex.get("question", ""))
+            tags.append(ex.get("tag", [-1]))
 
             conversation = [
                 {
                     "role": "user",
                     "content": [
                         {"type": "image"},
-                        {"type": "text", "text": ex["question"]},
+                        {"type": "text", "text": ex.get("question", "")},
                     ],
                 },
                 {
                     "role": "assistant",
                     "content": [
-                        {"type": "text", "text": ex["answer"]},
+                        {"type": "text", "text": ex.get("answer", "")},
                     ],
                 }
             ]
@@ -44,7 +51,7 @@ class RoadCapCollator:
             prompt = self.processor.apply_chat_template(conversation)
             text_prompts.append(prompt)
 
-        # 2. Process batch through LLaVA processor
+        # 3. Process batch through LLaVA processor
         batch = self.processor(
             text=text_prompts,
             images=images,
@@ -54,9 +61,15 @@ class RoadCapCollator:
             return_tensors="pt"
         )
 
-        # 3. Create labels mask
+        # 4. Create labels mask
         labels = batch["input_ids"].clone()
         labels[labels == self.tokenizer.pad_token_id] = -100
         batch["labels"] = labels
 
-        return batch  # dict format required by Trainer
+        # 5. Attach the metadata
+        batch["img_paths"] = img_paths
+        batch["questions"] = questions
+        batch["tags"] = tags
+
+        # 6. Convert BatchEncoding to a standard dict 
+        return dict(batch)

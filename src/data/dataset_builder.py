@@ -11,7 +11,7 @@ def build_dataset(cfg, tokenizer, image_processor, split="train", data_usage=1.0
             tokenizer=tokenizer,
             image_processor=image_processor,
             split=split,
-            split_ratio=(0.7, 0.3, 0.0), # have val set as test set as well for local DriveLM evaluation/benchmark
+            split_ratio=(0.8, 0.2, 0.0), # have val set as test set as well for local DriveLM evaluation/benchmark
             data_usage=data_usage
         )
         
@@ -22,7 +22,7 @@ def build_dataset(cfg, tokenizer, image_processor, split="train", data_usage=1.0
             tokenizer=tokenizer,
             image_processor=image_processor,
             split=split,
-            split_ratio=(0.7, 0.3, 0.0), # have val set as test set as well for local DriveLM evaluation/benchmark
+            split_ratio=(0.8, 0.2, 0.0), # have val set as test set as well for local DriveLM evaluation/benchmark
             data_usage=data_usage
         )
         

@@ -163,24 +163,39 @@ class DriveLMDataset(Dataset):
         # --- 2. CREATE COLLAGE ---
         final_image = self._create_surround_collage(image_map)
 
-        # --- 3. TEXT ---
-        # Note: RoadVQADataset returned 'question'/'answer'. 
-        # DriveLM JSON has 'conversations'. We normalize it here.
-        convs = data_item['conversations']
+        # # --- 3. TEXT ---
+        # # Note: RoadVQADataset returned 'question'/'answer'. 
+        # # DriveLM JSON has 'conversations'. We normalize it here.
+        # convs = data_item['conversations']
         
-        # LLaVA Prompt Logic:
-        # Standard DriveLM format is: Human: <image>\nQuestion ... GPT: Answer
-        question = convs[0]['value']
+        # # LLaVA Prompt Logic:
+        # # Standard DriveLM format is: Human: <image>\nQuestion ... GPT: Answer
+        # question = convs[0]['value']
         
-        # NOTE: Your Collator/Processor handles <image> tokens.
-        # It is safer to remove it from the raw text so we don't have double tokens.
-        question = question.replace("<image>", "").strip()
+        # # NOTE: Your Collator/Processor handles <image> tokens.
+        # # It is safer to remove it from the raw text so we don't have double tokens.
+        # question = question.replace("<image>", "").strip()
         
-        answer = convs[1]['value']
+        # answer = convs[1]['value']
 
+        # return {
+        #     "image": final_image,  
+        #     "question": question,
+        #     "answer": answer,
+        #     "id": data_item.get('id', str(index))
+        # }
+        
+        
+        convs = data_item['conversations']
+        question = convs[0]['value'].replace("<image>", "").strip()
+        answer = convs[1]['value'].strip()
+
+        # Return RAW items, plus the metadata we need for the evaluation loop
         return {
             "image": final_image,  
             "question": question,
             "answer": answer,
+            "img_path": data_item.get('image', ["unknown"])[0], 
+            "tag": data_item.get('tag', [-1]), 
             "id": data_item.get('id', str(index))
         }

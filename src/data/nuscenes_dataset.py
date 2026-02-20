@@ -95,7 +95,7 @@ class NuscenesDataset(Dataset):
                 img = self.transform(img)
             else:
                 img = np.array(img)
-
+                    
             return {
                 "img": img,
                 "filepath": path,
