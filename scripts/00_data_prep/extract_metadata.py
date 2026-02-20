@@ -1,14 +1,22 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+from ast import arg
 import os
 import sys
 from argparse import ArgumentParser
 import numpy as np
 from tqdm import tqdm
-from ultralytics import YOLO
+# from ultralytics import YOLO
 import cv2
+
+# yoloWorld
+from mmdet.apis import init_detector
+from mmyolo.registry import VISUALIZERS
+from mmengine.dataset import Compose
 
 # segment anything
 from segment_anything import build_sam, SamPredictor, build_sam_vit_b, build_sam_vit_l
+
+from mmdet.apis import init_detector, inference_detector as mmdet_inference_detector
 
 # tracker
 # 1. Calculate paths
@@ -17,8 +25,6 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file_path
 external_path = os.path.join(project_root, "external")
 
 # 2. Add 'external' to sys.path
-# This is the MAGIC fix. It lets Python find 'fast_reid' directly, 
-# satisfying the internal imports of the library.
 if external_path not in sys.path:
     sys.path.append(external_path)
 
@@ -26,10 +32,7 @@ if external_path not in sys.path:
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-# --- NOW IMPORTS WILL WORK ---
-
 # 4. Import using the library name directly (NOT external.fast_reid)
-# (You might need to revert your manual changes in mc_bot_sort.py back to original)
 from tracker.mc_bot_sort import BoTSORT 
 # OR if your mc_bot_sort is custom and lives in external/tracker:
 # from external.tracker.mc_bot_sort import BoTSORT
@@ -57,7 +60,7 @@ import time
 from torch.utils.data import DataLoader
 from pathlib import Path
 from typing import List
-from src.data.nuscenes import NuscenesDataset
+from src.data.nuscenes_dataset import NuscenesDataset
 from src.data.frontcam_dataset import FRONTCAMDataset
 import torchvision.transforms as T
 
@@ -198,11 +201,28 @@ def get_output_dir_from_nuscenes_folder(input_folder_path, args_out_dir, input_r
 
     return out_root / relative_path
 
+def inference_detector(model, inputs, score_thr, nms_thr):
+    with torch.no_grad():
+        _output = model.test_step(inputs)
+        output = []
+        for _out in _output:
+            pred_instances = _out.pred_instances
+            keep_idxs = nms(pred_instances.bboxes, pred_instances.scores, iou_threshold=nms_thr)
+            pred_instances = pred_instances[keep_idxs]
+            pred_instances = _out.pred_instances[_out.pred_instances.scores.float() > score_thr]
+            _out.pred_instances = pred_instances
+            output.append(_out)
+    return output
+
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument(
         '--img', help='Image path, include image file, dir and URL.')
     parser.add_argument('--checkpoint', help='Checkpoint file')
+    parser.add_argument('--det-model', choices=["yolov11", "yoloworld"], help='Detection model to use "yolov11" or "yoloworld"')
+    parser.add_argument('--det-model-config', default=None, help='Path to detection model config file (only for yoloworld)')
+    parser.add_argument('--open-classes', help='Open classes list for YoloWorld')
+
     parser.add_argument('--dataset', help='Choose dataset type to process either "valeo" or "drivelm"')
     parser.add_argument('--bs', type=int, default=1, help='Batch size')
     parser.add_argument(
@@ -318,8 +338,38 @@ def main():
     # We create a list of list: [[R,G,B], [R,G,B], ...]
     color_list = np.random.randint(0, 255, size=(200, 3)).tolist()
     
-    # build the YOLOv8 model from a config file and a checkpoint file
-    model = YOLO(args.checkpoint)
+    # build the detection model
+    model = None
+    if args.det_model == "yolov11":
+        print("Using YOLOv11 detection model")
+        model = YOLO(args.checkpoint)
+    elif args.det_model == "yoloworld":
+        print("Using YOLOworld detection model")
+        
+        if args.open_classes.endswith('.txt'):
+            with open(args.open_classes) as f:
+                lines = f.readlines()
+            open_classes = [[t.rstrip('\r\n')] for t in lines] + [[' ']]
+        else:
+            open_classes = [[t.strip()] for t in args.open_classes.split(',')]
+        
+        # init YOLO World
+        model = init_detector(args.det_model_config, args.checkpoint, device=args.device)
+        model.cfg.visualizer['line_width'] = 10
+        # visualizer = VISUALIZERS.build(model.cfg.visualizer)
+        model.dataset_meta['classes'] = tuple([l[0] for l in open_classes])
+        # visualizer.dataset_meta = model.dataset_meta
+        # visualizer.mask_color = [matplotlib.colormaps['tab20'](i)[:3] for i in range(len(model.dataset_meta['classes']))]
+
+        # build test pipeline
+        # model.cfg.test_dataloader.dataset.pipeline[0].type = 'mmdet.LoadImageFromNDArray'
+        # reparameterize texts / open classes for YOLOworld
+        model.reparameterize(open_classes)
+        # the dataset_meta is loaded from the checkpoint and
+        # then pass to the model in init_detector
+        model.dataset_meta['classes'] = tuple([l[0] for l in open_classes])
+    else:
+        raise ValueError("Choose detection model: either yolov11 or yoloworld")
 
     if args.use_sam:
         segmenter.model.to(args.device)
@@ -339,12 +389,11 @@ def main():
     }
 
     transform = T.Compose([
-        # T.Resize(640*2, interpolation=T.InterpolationMode.BILINEAR),
-        # T.CenterCrop(640*2),  # Ensures the final size is exactly 640x640
         T.ToTensor(),
         T.Lambda(lambda img: T.functional.pad(img, (0, (32 - img.shape[1] % 32) % 32, 32 - (img.shape[2] % 32), 0))),  # Pad to have H and W divisible by 32
         T.Lambda(lambda x: x.permute(0, 1, 2)),
     ])
+
 
     # --- 1. GET ALL SCENE FOLDERS ---
     if os.path.isdir(args.img):
@@ -379,14 +428,14 @@ def main():
         # init saving result format, result for the whole video of the scene of a sensor type
         results = {
             # "name": "2D_segmentation",
-            "name": "YOLOv11" + ("_SAM" if args.use_sam else "") + ("_SimpleTrack" if args.use_tracking else ""),
+            "name": args.det_model + ("_SAM" if args.use_sam else "") + ("_SimpleTrack" if args.use_tracking else ""),
             "time_stamp_generation": ''.join(str(time.time()).split('.')),
             "date_time": date_time,
             "img_path": args.img,
-            "model": "YOLOv11",
+            "model": args.det_model,
             "model_version": "1",
             # "sensor": folder_2.replace(folder_1+'_', '').replace(".npz.zip",""),
-            "output_type": "BB",
+            "output_type": "BB+SAM_masks+tracking" if args.use_sam else "BB",
             "results": []
         }
 
@@ -404,15 +453,18 @@ def main():
             dataset = FRONTCAMDataset(image_folder=scene_path, transform=transform) 
             # dataset = PONELoader(zip_file_path=zip_path, transform=transform, file_extension="jpg", sample_per_zipfile=1)
         elif args.dataset == "drivelm":
+            if args.det_model == "yoloworld":
+                transform = T.Compose([
+                T.ToTensor()
+            ])
+                
             dataset = NuscenesDataset(image_folder=scene_path, transform=transform)
+
 
         # 2. Get Input Count from Dataset instead of os.listdir
         input_count = len(dataset)
         
-        # # Define output directory
-        # output_dir = get_output_dir_from_nuscenes_folder(scene_path, args.out_dir, args.img)
-        
-        # 3. Decision Logic (Check if already processed)
+        # 3. Decision Logic (Check if the folder already processed)
         is_complete = False
         output_count = 0
         print(f"Checking output directory: {output_dir}, exists: {output_dir.exists()}, glob(*.json): {len(list(output_dir.glob('*.json'))) if output_dir.exists() else 'None'}")
@@ -421,7 +473,7 @@ def main():
                 output_count = len(list((output_dir / "vis").glob("*.png")))
             else:
                 output_count = len(list(output_dir.glob("*.json")))
-                # is_complete = True # if just folder exists, than it was processed
+                is_complete = True # if just folder exists, than it was processed
             
             if output_count >= input_count and not args.overwrite:
                 is_complete = True
@@ -442,7 +494,41 @@ def main():
             results["results"] = []  # empty results for the next frames
             images, filepaths = data['img'], data['filepath']
 
-            det_results = model(images, imgsz=1280, conf=args.score_thr)
+            if args.det_model == "yolov11":
+                det_results = model(images, imgsz=1280, conf=args.score_thr)
+            elif args.det_model == "yoloworld":
+                
+                # # 3. Run inference
+                # det_results = inference_detector(model,
+                #                         inputs=mmdet_data,
+                #                         score_thr=args.score_thr,
+                #                         nms_thr=args.nms_thr)
+                from mmengine.dataset import Compose, pseudo_collate
+                
+                # 1. Grab YOLO-World's official preprocessor pipeline
+                test_pipeline = Compose(model.cfg.test_dataloader.dataset.pipeline)
+
+                # 2. Build the dictionaries and run them through the pipeline
+                data_list = []
+                for filepath in filepaths:
+                    data_info = {
+                        'img_path': str(filepath),
+                        'img_id': 0,
+                        'texts': open_classes  # <-- We successfully inject the texts here!
+                    }
+                    # test_pipeline natively reads the image, pads it to 32-stride, and builds DetDataSample
+                    data_list.append(test_pipeline(data_info))
+                
+                # 3. Collate the results into the exact batch format MMDetection wants
+                mmdet_data = pseudo_collate(data_list)
+                
+                # 4. Use YOUR original custom inference function (the one at line 204)
+                det_results = inference_detector(model,
+                                        inputs=mmdet_data,
+                                        score_thr=args.score_thr,
+                                        nms_thr=args.nms_thr)
+                # print(det_results)
+                
 
             # go frame by frame for tracking and sam
             for img, det_res, filepath in zip(images, det_results, filepaths):
@@ -454,12 +540,20 @@ def main():
                                 "yolo_feat": []
                                 } # to be appended in results['results']
 
-                # Get candidate predict info with score threshold
-                pred_instances = det_res
-                bboxes = pred_instances.boxes.xyxy  # [N, 4]
-                scores = pred_instances.boxes.conf  # [N] xyxy
-                labels = pred_instances.boxes.cls  # [N]
-                dataset_classes = pred_instances.names
+                # Get candidate predict info based on the model type
+                if args.det_model == "yolov11":
+                    pred_instances = det_res
+                    bboxes = pred_instances.boxes.xyxy  # [N, 4]
+                    scores = pred_instances.boxes.conf  # [N]
+                    labels = pred_instances.boxes.cls   # [N]
+                    dataset_classes = pred_instances.names
+                elif args.det_model == "yoloworld":
+                    pred_instances = det_res.pred_instances
+                    bboxes = pred_instances.bboxes      # [N, 4]
+                    scores = pred_instances.scores      # [N]
+                    labels = pred_instances.labels      # [N]
+                    dataset_classes = model.dataset_meta['classes']
+
                 # Apply NMS
                 keep_idxs = nms(bboxes, scores, iou_threshold=args.nms_thr)
                 # Filter predictions
@@ -554,7 +648,8 @@ def main():
 
                                 vis_image = np.ascontiguousarray(vis_image)
 
-                                cv2.rectangle(vis_image,(int(box_numpy[0,0]),int(box_numpy[0,1])),(int(box_numpy[0,2]),int(box_numpy[0,3])),class_palette[int(tcls)],2)
+                                # cv2.rectangle(vis_image,(int(box_numpy[0,0]),int(box_numpy[0,1])),(int(box_numpy[0,2]),int(box_numpy[0,3])),class_palette[int(tcls)],2)
+                                cv2.rectangle(vis_image,(int(box_numpy[0,0]),int(box_numpy[0,1])),(int(box_numpy[0,2]),int(box_numpy[0,3])),class_palette[int(tcls) % 10], 2)
                             else:
                                 # xyxy to x_tl, y_tl, w, h
                                 box_copy = box.copy()
@@ -620,13 +715,18 @@ if __name__ == '__main__':
     print("FINISHED.")
 
 # salloc -A eu-25-10 -p qgpu_exp --gpus-per-node 1 -t 1:00:00 --nodes 1
+# salloc -A open-36-7 -p qgpu_exp --gpus-per-node 1 -t 1:00:00 --nodes 1
 # source /mnt/proj1/eu-25-10/envs/yolov11_sam_tracking/bin/activate
 # cd /mnt/proj1/eu-25-10/dmytro/RoadCap-Gen
 
 # python scripts/00_data_prep/extract_metadata.py --img /mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/train_val_samples_grouped/ --checkpoint external/models/YOLOv11/best.pt --segment-ckpt external/models/SAM/sam_vit_h_4b8939.pth --use-tracking --bs=1 --out-dir="output/drivelm_yolo/" --dataset="drivelm" --fast-reid-config external/fast_reid/configs/MOT17/sbs_S50.yml --fast-reid-weights external/models/Tracker/mot17_sbs_S50.pth
 
-# nuscenes datat to process
+# nuscenes datat to process using yolov11
 # python scripts/00_data_prep/extract_metadata.py --img /scratch/project/eu-25-10/datasets/nuScenes/samples_grouped --checkpoint external/models/YOLOv11/best.pt --segment-ckpt external/models/SAM/sam_vit_h_4b8939.pth --use-tracking --bs=1 --out-dir="/mnt/proj1/eu-25-10/datasets/nuScenes_metadata/tmp_yolo" --dataset="drivelm" --fast-reid-config external/fast_reid/configs/MOT17/sbs_S50.yml --fast-reid-weights external/models/Tracker/mot17_sbs_S50.pth
 
-# valeo data to process
+# nuscenes datat to process using yoloWorld
+# source /mnt/proj1/eu-25-10/envs/yoloworld-seg-track/bin/activate
+# python scripts/00_data_prep/extract_metadata.py --img /scratch/project/eu-25-10/datasets/nuScenes/samples_grouped --checkpoint external/models/YoloWorld/yolo_world_v2_xl_obj365v1_goldg_cc3mlite_pretrain-5daf1395.pth --det-model-config external/models/YoloWorld/yolo_world_v2_xl_vlpan_bn_2e-3_100e_4x8gpus_obj365v1_goldg_train_lvis_minival.py --open-classes external/models/YoloWorld/open_classes_nuscnesgt_minus_yolov11_short_names.txt --det-model yoloworld  --segment-ckpt external/models/SAM/sam_vit_h_4b8939.pth --use-tracking --bs=1 --out-dir="/mnt/proj1/eu-25-10/datasets/nuScenes_metadata/tmp_yoloWorld" --dataset="drivelm" --fast-reid-config external/fast_reid/configs/MOT17/sbs_S50.yml --fast-reid-weights external/models/Tracker/mot17_sbs_S50.pth
+
+# valeo data to process using yolov11
 # python scripts/00_data_prep/extract_metadata.py --img /scratch/project/eu-25-10/datasets/FRONT_CAM_zipped/20250527/18 --checkpoint external/models/YOLOv11/best.pt --segment-ckpt external/models/SAM/sam_vit_h_4b8939.pth --use-tracking --bs=1 --out-dir=/scratch/project/eu-25-10/datasets/FRONT_CAM_zipped_metadata/YOLOv11_1/ --dataset="valeo" --fast-reid-config external/fast_reid/configs/MOT17/sbs_S50.yml --fast-reid-weights external/models/Tracker/mot17_sbs_S50.pth
