@@ -1,3 +1,6 @@
+⚠️ **Project Note: Work in Progress (WiP)** > This repository contains active, ongoing research code. The codebase is currently under active development. 
+**Contact:** For any questions, collaborations, or discussions regarding this project, please feel free to reach out to me at: **khursdmy@fel.cvut.cz**
+
 # Caption Generation for Enhancing Road Scene Reasoning in VLMs
 
 Generate QAs (and captions in the future) for driving scenes to fine-tune Vision–Language Models (VLMs), helping them better describe and reason about automotive scenarios.
