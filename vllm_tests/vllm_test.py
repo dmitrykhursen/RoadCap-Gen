@@ -12,7 +12,6 @@ def main(args):
             self.thinking = thinking
             self.model_name = model_name
 
-            # Initialize vLLM (gpu_memory_utilization can be lowered if you hit OOM)
             self.llm = LLM(model=model_name, gpu_memory_utilization=0.9)
             self.tokenizer = self.llm.get_tokenizer()
 
@@ -24,12 +23,18 @@ def main(args):
 
         def generate(self, messages):
             outputs = self.llm.chat(
-                messages,  # may need to nest in a list, unsure now
+                messages,
                 self.sampling_params,
-                chat_template_kwargs={"enable_thinking": self.thinking},  # Set to False to strictly disable thinking
+                chat_template_kwargs={
+                    "enable_thinking": self.thinking,
+                },
             )
+            response = outputs[0].outputs[0].text.split("</think>")
 
-            return outputs[0].outputs[0].text.split("</think>")
+            if len(response) == 1:
+                return "", response[0].strip()
+
+            return response[0].replace("<think>", "").strip(), response[1].strip()
 
     class ModelResponder:
         def __init__(self, model, tokenizer, model_name, thinking=True):
@@ -298,9 +303,6 @@ What are the important objects in the current scene? Those objects will be consi
     messages = [{"role": "user", "content": test_prompt}]
     response = responder.generate(messages)
     print("Time taken:", end := time.time() - start)
-    
-    if len(response) == 1:
-        response = ("", response[0])
 
     print(f"Model: {model_name}, use_vllm: {args.use_vllm}, thinking: {args.thinking}")
     with open("results_tweaked_non_thinking.txt", "a") as f:

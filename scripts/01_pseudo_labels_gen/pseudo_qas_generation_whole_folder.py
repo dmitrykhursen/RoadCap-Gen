@@ -6,24 +6,28 @@ import random
 import tempfile
 from bisect import bisect_left
 from pathlib import Path
+
 import demjson3
+import numpy as np
 import regex as re
 import torch
+import wandb
 import yaml
-import numpy as np
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
-import wandb
+from vllm import LLM, SamplingParams
 
 # =============================================
 # Helper Functions & Logic
 # =============================================
+
 
 def get_prefixed_permutation(options):
     permuted = options.copy()
     random.shuffle(permuted)
     letters = ["A. ", "B. ", "C. ", "D. "]
     return [f"{letters[i]}{item}" for i, item in enumerate(permuted)]
+
 
 def get_test_distribution(ratio_data, no_dir_questions=None):
     test_distribution = {}
@@ -35,11 +39,13 @@ def get_test_distribution(ratio_data, no_dir_questions=None):
             test_distribution[question] = entry["ratio_test"]
     return test_distribution
 
+
 def distribute_by_ratio(question_to_ratio, total_count):
     ratio_sum = sum(question_to_ratio.values())
     normalized = {q: r / ratio_sum for q, r in question_to_ratio.items()}
     counts = {q: max(1, round(normalized[q] * total_count)) for q in question_to_ratio}
     return counts
+
 
 def get_past(tracks, frames, current_frame, frames_back):
     start_f = current_frame - frames_back
@@ -52,16 +58,25 @@ def get_past(tracks, frames, current_frame, frames_back):
     missing = expected - present
     return window, missing
 
-def detections_to_text(data, tracks_by_object_id=None, frame=None, frames_back=3, track_type="m", include_tracks=False, dataset_name="valeo"):
+
+def detections_to_text(
+    data, tracks_by_object_id=None, frame=None, frames_back=3, track_type="m", include_tracks=False, dataset_name="valeo"
+):
+    if frame is None:
+        raise ValueError("Frame must be provided to extract frame number.")
     if dataset_name == "valeo":
-        frame_idx = int(frame.split("_")[-1].split(".")[0])
+        frame_idx = int(frame.split("_")[-1].split(".")[0])  # type: ignore
     elif dataset_name == "nuscenes":
-        frame_idx = int(frame.split(".")[0].split("_")[-1])
-    
+        frame_idx = int(frame.split(".")[0].split("_")[-1])  # type: ignore
+    else:
+        raise ValueError(f"Unsupported dataset_name: {dataset_name}")
+
     lines = ["Here is the list of objects detected in the scene. Use them to generate the QA pairs:"]
     for category, cat_objs in data["categories"].items():
         for idx, cat_obj in enumerate(cat_objs["objects"]):
-            line = f"- {category}_{idx}:\n\t - current bbox: {cat_obj['bbox']}\n\t - current middle point: {cat_obj['mid_point']}."
+            line = (
+                f"- {category}_{idx}:\n\t - current bbox: {cat_obj['bbox']}\n\t - current middle point: {cat_obj['mid_point']}."
+            )
             if include_tracks and tracks_by_object_id:
                 tracks = tracks_by_object_id.get(cat_obj["id"])
                 if tracks:
@@ -69,36 +84,49 @@ def detections_to_text(data, tracks_by_object_id=None, frame=None, frames_back=3
                     frames = [d["frame"] for d in track_list]
                     window, missing = get_past(track_list, frames, frame_idx, frames_back)
                     if len(window) > 0:
-                        r = range(len(window), 0, -1) if frame_idx in missing else range(len(window)-1, -1, -1)
+                        r = range(len(window), 0, -1) if frame_idx in missing else range(len(window) - 1, -1, -1)
                         if track_type == "m":
-                            pos = [f"[{d['x']}, {d['y']}, {d['z']}] at t-{t*55} ms" for t, d in zip(r, window)]
+                            pos = [f"[{d['x']}, {d['y']}, {d['z']}] at t-{t * 55} ms" for t, d in zip(r, window)]
                             line += f"\n\t - relative positions: {', '.join(pos)}."
                         else:
-                            mid = [f"{d['center_2d_px']} at t-{t*55} ms" for t, d in zip(r, window)]
+                            mid = [f"{d['center_2d_px']} at t-{t * 55} ms" for t, d in zip(r, window)]
                             line += f"\n\t - midpoints: {', '.join(mid)}."
             lines.append(line)
     return "\n".join(lines)
 
+
 def generate_prompt(q, description, objects, config_prompts, directions, tracks=False, track_type="m"):
-    parts = [config_prompts["context"], config_prompts["obj"] if "<obj>" in q else config_prompts["no_obj"], config_prompts["qa_generation_QWEN"]]
-    if tracks: parts.append(f"\n{config_prompts.get('tracks_' + track_type, '')}")
+    parts = [
+        config_prompts["context"],
+        config_prompts["obj"] if "<obj>" in q else config_prompts["no_obj"],
+        config_prompts["qa_generation_QWEN"],
+    ]
+    if tracks:
+        parts.append(f"\n{config_prompts.get('tracks_' + track_type, '')}")
     parts.append(objects)
-    if "<position>" in q: parts.append(f"\n{config_prompts.get('position', '')}")
-    if any(x in q for x in ["important objects", "priority"]): parts.append(f"\n{config_prompts.get('important_objects', '')}")
-    if description: parts.append(f"\nThe scene description is:\n {description}")
-    if "following options:" in q: q += " " + " ".join(get_prefixed_permutation(directions))
+    if "<position>" in q:
+        parts.append(f"\n{config_prompts.get('position', '')}")
+    if any(x in q for x in ["important objects", "priority"]):
+        parts.append(f"\n{config_prompts.get('important_objects', '')}")
+    if description:
+        parts.append(f"\nThe scene description is:\n {description}")
+    if "following options:" in q:
+        q += " " + " ".join(get_prefixed_permutation(directions))
     parts.append(f"\nThe question to use is:\n {q}\n")
     return "\n".join(parts)
+
 
 # =============================================
 # Experiment Management & IO
 # =============================================
 
+
 def generate_experiment_name(args):
-    model_short = args.model.split('/')[-1]
+    model_short = args.model.split("/")[-1]
     think_tag = "think" if args.thinking else "no-think"
     track_tag = f"tracks-{args.track_type}" if args.use_tracks else "no-tracks"
     return f"{model_short}_{args.dataset_name}_{think_tag}_{track_tag}_q{args.number_of_questions}"
+
 
 def save_metadata(args, output_folder, exp_name):
     os.makedirs(output_folder, exist_ok=True)
@@ -107,34 +135,41 @@ def save_metadata(args, output_folder, exp_name):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(vars(args), f, indent=4, ensure_ascii=False)
 
+
 def append_json_line(path, obj):
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
+
 def random_permutation(q_distribution, min_length=15, max_length=15):
     available_keys = [k for k, v in q_distribution.items() if v > 0]
-    if not available_keys: return []
+    if not available_keys:
+        return []
     L = min(random.randint(min_length, max_length), sum(q_distribution.values()))
-    
+
     chosen = []
     # Mix of unique and then repeats
     random.shuffle(available_keys)
     for q in available_keys:
-        if len(chosen) >= L: break
+        if len(chosen) >= L:
+            break
         chosen.append(q)
         q_distribution[q] -= 1
-    
+
     while len(chosen) < L:
         active_keys = [k for k, v in q_distribution.items() if v > 0]
-        if not active_keys: break
+        if not active_keys:
+            break
         q = random.choice(active_keys)
         chosen.append(q)
         q_distribution[q] -= 1
     return chosen
 
+
 # =============================================
 # Path & Directory Helpers
 # =============================================
+
 
 def list_drive_lm_scenes(root_dir: str) -> list[str]:
     """Scans for leaf directories (scenes) that contain images/jsons."""
@@ -142,9 +177,10 @@ def list_drive_lm_scenes(root_dir: str) -> list[str]:
     scene_folders = []
     print(f"🔍 Scanning {root_dir} for scenes...")
     for root, dirs, files in os.walk(root_path):
-        if any(f.lower().endswith(('.json')) for f in files):
+        if any(f.lower().endswith((".json")) for f in files):
             scene_folders.append(str(Path(root)))
     return sorted(scene_folders)
+
 
 def get_output_dir(zip_path, args_out_dir):
     """Path resolver for Valeo dataset structure."""
@@ -153,16 +189,17 @@ def get_output_dir(zip_path, args_out_dir):
     zip_parts = zip_path.parts
     if "PONE_zipped" in zip_parts:
         idx = zip_parts.index("PONE_zipped")
-        relative_path = Path(*zip_parts[idx + 1:])
-        output_dir = out_root / relative_path.with_suffix('')
+        relative_path = Path(*zip_parts[idx + 1 :])
+        output_dir = out_root / relative_path.with_suffix("")
     elif "FRONT_CAM_zipped" in zip_parts:
         idx = zip_parts.index("FRONT_CAM_zipped")
-        relative_path = Path(*zip_parts[idx + 1:])
-        output_dir = out_root / relative_path.with_suffix('')
+        relative_path = Path(*zip_parts[idx + 1 :])
+        output_dir = out_root / relative_path.with_suffix("")
     else:
         output_dir = out_root / "out"
-        
+
     return output_dir
+
 
 def get_output_dir_from_nuscenes_folder(input_folder_path, args_out_dir, input_root):
     """Path resolver for nuScenes dataset structure."""
@@ -175,9 +212,11 @@ def get_output_dir_from_nuscenes_folder(input_folder_path, args_out_dir, input_r
         relative_path = input_path.name
     return out_root / relative_path
 
+
 # =============================================
 # Model Wrapper
 # =============================================
+
 
 class ModelResponder:
     def __init__(self, model, tokenizer, model_name, thinking=True):
@@ -187,68 +226,58 @@ class ModelResponder:
         self.model_name = model_name.lower()
 
     def generate(self, messages, max_new_tokens=2048):
-        text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=self.thinking)
+        text = self.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=self.thinking
+        )
         inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
         generated_ids = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
-        output_ids = generated_ids[0][len(inputs.input_ids[0]):].tolist()
-        
-        THINK_END = 151668 
+        output_ids = generated_ids[0][len(inputs.input_ids[0]) :].tolist()
+
+        THINK_END = 151668
         try:
             idx = len(output_ids) - output_ids[::-1].index(THINK_END)
         except ValueError:
             idx = 0
-        
+
         thinking_text = self.tokenizer.decode(output_ids[:idx], skip_special_tokens=True).strip()
         content = self.tokenizer.decode(output_ids[idx:], skip_special_tokens=True).strip()
         return thinking_text, content
 
-# from vllm import LLM, SamplingParams
-# class ModelRespondervllm:
-#     def __init__(self, model_name, thinking=True):
-#         self.thinking = thinking
-#         self.model_name = model_name.lower()
-        
-#         # Initialize vLLM (gpu_memory_utilization can be lowered if you hit OOM)
-#         print("Loading vLLM engine...")
-#         self.llm = LLM(model=model_name, dtype="bfloat16", trust_remote_code=True, gpu_memory_utilization=0.9)
-#         self.tokenizer = self.llm.get_tokenizer()
-        
-#         # Pre-compile sampling parameters
-#         self.sampling_params = SamplingParams(
-#             max_tokens=2048,
-#             temperature=0.7, # Adjust if needed
-#             top_p=0.9
-#         )
 
-#     def generate(self, messages):
-#         # Format prompt
-#         kwargs = {"tokenize": False, "add_generation_prompt": True}
-#         if self.thinking:
-#             # Note: Only keep this if your specific Qwen tokenizer version supports it
-#             kwargs["enable_thinking"] = True 
-            
-#         text = self.tokenizer.apply_chat_template(messages, **kwargs)
-        
-#         # Run inference (use_tqdm=False prevents double progress bars)
-#         outputs = self.llm.generate([text], self.sampling_params, use_tqdm=False)
-        
-#         # Extract token IDs directly from vLLM output to match your previous logic
-#         output_ids = list(outputs[0].outputs[0].token_ids)
-        
-#         THINK_END = 151668 
-#         try:
-#             idx = len(output_ids) - output_ids[::-1].index(THINK_END)
-#         except ValueError:
-#             idx = 0
-        
-#         thinking_text = self.tokenizer.decode(output_ids[:idx], skip_special_tokens=True).strip()
-#         content = self.tokenizer.decode(output_ids[idx:], skip_special_tokens=True).strip()
-        
-#         return thinking_text, content
-    
+class ModelRespondervllm:
+    def __init__(self, model_name, thinking=True):
+        self.thinking = thinking
+        self.model_name = model_name
+
+        self.llm = LLM(model=model_name, gpu_memory_utilization=0.9)
+        self.tokenizer = self.llm.get_tokenizer()
+
+        # Pre-compile sampling parameters, taken from https://qwen.readthedocs.io/en/latest/deployment/vllm.html#python-library
+        if thinking:
+            self.sampling_params = SamplingParams(temperature=0.6, top_p=0.95, top_k=20, max_tokens=32768)
+        else:
+            self.sampling_params = SamplingParams(temperature=0.7, top_p=0.8, top_k=20, max_tokens=32768)
+
+    def generate(self, messages):
+        outputs = self.llm.chat(
+            messages,
+            self.sampling_params,
+            chat_template_kwargs={
+                "enable_thinking": self.thinking,
+            },
+        )
+        response = outputs[0].outputs[0].text.split("</think>")
+
+        if len(response) == 1:
+            return "", response[0].strip()
+
+        return response[0].replace("<think>", "").strip(), response[1].strip()
+
+
 # =============================================
 # Main Execution Logic
 # =============================================
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -271,21 +300,22 @@ def parse_args():
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing results")
     return parser.parse_args()
 
+
 if __name__ == "__main__":
     args = parse_args()
     exp_name = generate_experiment_name(args)
-    
+
     # Configuration and Model Init
     ratio_data = json.load(open(args.qas_ratios))
     config = yaml.safe_load(open(args.prompts_config))
     config_prompts = config["prompts"]
     directions = ["Turn right.", "Drive backward.", "Going ahead.", "Turn left."]
-    
+
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model = AutoModelForCausalLM.from_pretrained(args.model, dtype="auto", device_map="auto")
-    responder = ModelResponder(model, tokenizer, args.model, thinking=args.thinking)
-    
-    # responder = ModelRespondervllm(args.model, thinking=args.thinking)
+    # responder = ModelResponder(model, tokenizer, args.model, thinking=args.thinking)
+
+    responder = ModelRespondervllm(args.model, thinking=args.thinking)
 
     # 1. Get all nested scene folders
     all_scene_paths = list_drive_lm_scenes(args.yolo_path)
@@ -294,7 +324,6 @@ if __name__ == "__main__":
 
     # 2. Iterate with Progress Counter
     for iz, scene_folder in enumerate(all_scene_paths):
-        
         # Output directory parsing
         if args.dataset_name == "valeo":
             output_dir = get_output_dir(scene_folder, args.output_folder)
@@ -302,31 +331,33 @@ if __name__ == "__main__":
             output_dir = get_output_dir_from_nuscenes_folder(scene_folder, args.output_folder, args.yolo_path)
         else:
             output_dir = Path(args.output_folder) / Path(scene_folder).name
-            
+
         print(f"{output_dir=}")
 
         # 3. Decision Logic (Check if the folder already processed)
         is_complete = False
         output_count = 0
-        
+
         # We output `.jsonl` files in this script, so we search for those.
         # This mirrors your logic: "len(list(output_dir.glob('*.json'))) if output_dir.exists() else 'None'"
-        print(f"Checking output directory: {output_dir}, exists: {output_dir.exists()}, glob(*.jsonl): {len(list(output_dir.glob('*.jsonl'))) if output_dir.exists() else 'None'}")
-        
+        print(
+            f"Checking output directory: {output_dir}, exists: {output_dir.exists()}, glob(*.jsonl): {len(list(output_dir.glob('*.jsonl'))) if output_dir.exists() else 'None'}"
+        )
+
         if output_dir.exists():
             output_count = len(list(output_dir.glob("*.jsonl")))
-            is_complete = True # if just folder exists, than it was processed
-            
+            is_complete = True  # if just folder exists, than it was processed
+
             # Here input_count logically maps to the generated file. Assuming 1 JSONL file completes the folder.
             if output_count >= 1 and not args.overwrite:
                 is_complete = True
 
         if is_complete:
-            print(f"⏩ [{iz+1}/{total_scenes}] Skipping: {output_dir} (Processed {output_count} jsonl files)")
-            print(" - - - - - "*3)
+            print(f"⏩ [{iz + 1}/{total_scenes}] Skipping: {output_dir} (Processed {output_count} jsonl files)")
+            print(" - - - - - " * 3)
             continue
 
-        print(f"🚀 [{iz+1}/{total_scenes}] Processing: {output_dir}")
+        print(f"🚀 [{iz + 1}/{total_scenes}] Processing: {output_dir}")
         output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -334,6 +365,7 @@ if __name__ == "__main__":
             processed_json = os.path.join(scene_folder, "merged_processed.json")
             if not os.path.exists(processed_json):
                 from src.utils.qas_generation_helper import run_yolo_processing
+
                 data = run_yolo_processing(input_path=scene_folder, output_path=scene_folder, dataset_name=args.dataset_name)
             else:
                 data = json.load(open(processed_json))
@@ -353,42 +385,48 @@ if __name__ == "__main__":
             pattern = r"\b\w+_\d+\b"
 
             items = sorted(data.items())
-            for scene_id, obj_info in tqdm(items, desc=f"Scene {iz+1}/{total_scenes}"):
-                scene_text = detections_to_text(obj_info, tracks_by_id, scene_id, args.frames_back, args.track_type, args.use_tracks, args.dataset_name)
-                
-                questions = ["What are the important objects in the current scene?"] + \
-                            random_permutation(q_dist, args.number_of_questions-1, args.number_of_questions-1)
-                
+            for scene_id, obj_info in tqdm(items, desc=f"Scene {iz + 1}/{total_scenes}"):
+                scene_text = detections_to_text(
+                    obj_info, tracks_by_id, scene_id, args.frames_back, args.track_type, args.use_tracks, args.dataset_name
+                )
+
+                questions = ["What are the important objects in the current scene?"] + random_permutation(
+                    q_dist, args.number_of_questions - 1, args.number_of_questions - 1
+                )
+
                 scene_results = {}
                 used_objs = set()
 
                 with torch.inference_mode():
                     for i, q in enumerate(questions):
-                        prompt = generate_prompt(q, None, scene_text, config_prompts, directions, args.use_tracks, args.track_type)
+                        prompt = generate_prompt(
+                            q, None, scene_text, config_prompts, directions, args.use_tracks, args.track_type
+                        )
                         if used_objs and "<obj>" in q:
                             prompt += f"\nAvoid reusing: {', '.join(sorted(used_objs))}"
-                        
+
                         messages = [{"role": "user", "content": prompt}]
                         _, content = responder.generate(messages)
-                        
+
                         try:
                             clean_content = content.strip()
-                            if not clean_content.startswith("{"): 
+                            if not clean_content.startswith("{"):
                                 clean_content = "{" + f'"Question_{i}": ' + clean_content + "}"
                             parsed = json.loads(clean_content)
+                            # TODO: add image path to the results, so that we can parse it out later
                             scene_results.update(parsed)
                             used_objs.update(re.findall(pattern, content))
                         except:
                             continue
-                
+
                 append_json_line(str(output_file), {scene_id: scene_results})
 
         except Exception as e:
-            print(f"❌ Error in [{iz+1}/{total_scenes}] {scene_folder}: {e}")
+            print(f"❌ Error in [{iz + 1}/{total_scenes}] {scene_folder}: {e}")
 
     print("Job complete.")
-    
-        
+
+
 # salloc -A eu-25-10 -p qgpu_exp --gpus-per-node 1 -t 1:00:00 --nodes 1
 # salloc -A OPEN-36-7 -p qgpu_exp --gpus-per-node 1 -t 1:00:00 --nodes 1
 
