@@ -249,7 +249,14 @@ class ModelRespondervllm:
         self.thinking = thinking
         self.model_name = model_name
 
-        self.llm = LLM(model=model_name, gpu_memory_utilization=0.9)
+        self.llm = LLM(
+            model=model_name,
+            dtype="bfloat16",
+            gpu_memory_utilization=0.95,
+            enable_chunked_prefill=True,
+            max_model_len=32768,
+            enable_prefix_caching=True,
+        )
         self.tokenizer = self.llm.get_tokenizer()
 
         # Pre-compile sampling parameters, taken from https://qwen.readthedocs.io/en/latest/deployment/vllm.html#python-library
@@ -266,12 +273,15 @@ class ModelRespondervllm:
                 "enable_thinking": self.thinking,
             },
         )
-        response = outputs[0].outputs[0].text.split("</think>")
+        text = outputs[0].outputs[0].text
 
-        if len(response) == 1:
-            return "", response[0].strip()
+        if "</think>" in text:
+            think, answer = text.split("</think>", 1)
+            think = think.replace("<think>", "").strip()
+        else:
+            think, answer = "", text.strip()
 
-        return response[0].replace("<think>", "").strip(), response[1].strip()
+        return think, answer.strip()
 
 
 # =============================================
