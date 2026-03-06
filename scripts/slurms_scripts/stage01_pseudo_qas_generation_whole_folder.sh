@@ -24,8 +24,7 @@ DATASET_NAME="nuscenes"
 # yolov11 annotanions
 # BASE_YOLO="/mnt/proj1/eu-25-10/datasets/nuScenes_metadata/Yolov11_1/"
 # OUTPUT_FOLDER="/mnt/proj1/eu-25-10/datasets/nuScenes_metadata/qas_gen_from_yolov11_no_tracks_no_llava_caption/"
-# DATASET_NAME="nuscenes"  
-   
+# DATASET_NAME="nuscenes"
 
 # # yolov11 + yoloworld annotanions TODO
 # BASE_YOLO="/scratch/project/eu-25-10/datasets/nuScenes_metadata/annotations_in_valeo_format/"
