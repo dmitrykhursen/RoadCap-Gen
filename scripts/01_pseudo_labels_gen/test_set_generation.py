@@ -1,6 +1,7 @@
 import argparse
 import json
 import random
+import traceback
 from bisect import bisect_left
 from pathlib import Path
 
@@ -10,8 +11,7 @@ import yaml
 from tqdm import tqdm
 from vllm import LLM, SamplingParams
 
-
-# sbatch --job-name=n008_generation qa_test_gen.sh --yolo_path="/scratch/project/eu-25-10/datasets/nuScenes_metadata/annotations_in_valeo_format" --qas_counts_dir="distributed_counts" --prompts_config="configs/inference/llm_prompt_config.yaml" --scene_prefix n008 --thinking
+# sbatch --job-name=n008_generation qa_test_gen.sh --yolo_path="/scratch/project/eu-25-10/datasets/nuScenes_metadata/annotations_in_valeo_format" --qas_counts_dir="distributed_counts" --prompts_config="configs/inference/llm_prompt_config.yaml" --scene_prefix n008 --thinking --scene_idx_start 0 --scene_idx_end 2
 # sbatch --job-name=n015_generation qa_test_gen.sh --yolo_path="/scratch/project/eu-25-10/datasets/nuScenes_metadata/annotations_in_valeo_format" --qas_counts_dir="distributed_counts" --prompts_config="configs/inference/llm_prompt_config.yaml" --scene_prefix n015 --thinking
 
 # =============================================
@@ -204,6 +204,8 @@ def parse_args():
 
     # NEW: Argument to filter scenes
     parser.add_argument("--scene_prefix", type=str, default=None, help="Filter scenes by prefix (e.g., 'n008' or 'n015')")
+    parser.add_argument("--scene_idx_start", type=int, default=None)
+    parser.add_argument("--scene_idx_end", type=int, default=None)
 
     parser.add_argument(
         "--yolo_path", type=str, required=True, help="Path to /annotations_in_valeo_format containing the 6 camera folders"
@@ -239,21 +241,45 @@ if __name__ == "__main__":
     total_scenes = len(all_scenes)
     print(f"🎬 Found {total_scenes} total scenes to process.")
 
+    all_scenes = sorted(all_scenes)
+    if args.scene_idx_start is not None and args.scene_idx_end is not None:
+        if args.scene_idx_end > total_scenes:
+            print(
+                f"⚠️ scene_idx_end {args.scene_idx_end} is greater than total scenes {total_scenes}. Adjusting to {total_scenes}."
+            )
+            args.scene_idx_end = total_scenes
+        all_scenes = all_scenes[args.scene_idx_start : args.scene_idx_end]
+        print(f"🔍 Further filtering scenes to index range: [{args.scene_idx_start}, {args.scene_idx_end})")
+        print(f"🎬 Now processing {len(all_scenes)} scenes after index filtering.")
+
     responder = ModelRespondervllm(args.model, thinking=args.thinking)
+
+    total_scenes = len(all_scenes)
     for iz, scene_name in tqdm(enumerate(all_scenes), total=total_scenes, desc="Scenes overall"):
         output_dir = Path(args.output_folder)
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / f"qas_{scene_name}_{exp_name}.jsonl"
-
         try:
+            counts_file = Path(args.qas_counts_dir) / f"{scene_name}.json"
+            if not counts_file.exists():
+                print(f"⚠️ Missing counts file for {scene_name}. Skipping.")
+                continue
             # 1. File gathering and frame counting
             cam_json_files = {}
+            cam_files_lens = []
             for cam in cameras:
                 cam_dir = Path(args.yolo_path) / cam / scene_name
                 jsons = sorted([f for f in cam_dir.glob("*.json") if "merged" not in f.name])
                 cam_json_files[cam] = jsons
+                cam_files_lens.append(len(jsons))
 
             ref_cam = cameras[0]
+            # Check that all cameras have the same number of frames for this scene
+            if len(set(cam_files_lens)) != 1:
+                print("Numbers differ:", cam_files_lens)
+                print(f"⚠️ Warning: Different number of frames across cameras for {scene_name}. Skipping this scene.")
+                continue
+
             num_frames = len(cam_json_files[ref_cam])
 
             if num_frames == 0:
@@ -284,10 +310,6 @@ if __name__ == "__main__":
                 print(f"🚀 [{iz + 1}/{total_scenes}] Processing: {scene_name}")
 
             # 3. Load counts and tracks
-            counts_file = Path(args.qas_counts_dir) / f"{scene_name}.json"
-            if not counts_file.exists():
-                print(f"⚠️ Missing counts file for {scene_name}. Skipping.")
-                continue
 
             q_dist = json.load(open(counts_file))
             total_questions_needed = sum(q_dist.values())
@@ -321,7 +343,6 @@ if __name__ == "__main__":
                 # Skip if we already successfully wrote this frame to the JSONL
                 if frame_master_id in processed_frames:
                     continue
-
                 combined_scene_text = [
                     "Here is the list of objects detected in the scene from all cameras. Use them to generate the QA pairs:"
                 ]
@@ -337,8 +358,7 @@ if __name__ == "__main__":
                     else:
                         data = json.load(open(processed_json))
 
-                    cam_data = data.get(cam_json_files[cam][frame_idx].stem + ".jpg", None)
-
+                    cam_data = data.get(cam_json_files[cam][frame_idx].stem + ".jpg", {})
                     cam_text = detections_to_text(
                         cam_data, cam, frame_idx, tracks_by_id, args.frames_back, args.track_type, args.use_tracks
                     )
@@ -371,8 +391,9 @@ if __name__ == "__main__":
                             print(f"Error parsing content for question {i}: {e}")
                             continue
                 append_json_line(str(output_file), {frame_master_id: scene_results})
-
         except Exception as e:
             print(f"❌ Error in [{iz + 1}/{total_scenes}] {scene_name}: {e}")
+            print(f"CAM {cam} FRAME {frame_idx}")
+            traceback.print_exc()
 
     print("Job complete.")
