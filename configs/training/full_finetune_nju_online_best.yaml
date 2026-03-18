@@ -8,17 +8,16 @@ logging_steps: 10      # Log loss every 10 steps
 grad_checkpointing: true   # Enable gradient checkpointing (saves VRAM)
 data_usage: 1.0        # Use a fraction of the dataset for quicker experiments (1.0 = full dataset)
 # data_usage: 0.01        # for fast debug run
-# data_usage: 0.001        # for fast debug run
 
-# my default training args
-learning_rate: 1e-3 # 2e-4 for LLM 1e-3 for MMP (projector)
-warmup_ratio: 0.03        # Warmup ratio for learning rate scheduler
-lr_scheduler_type: "cosine"
+# # my default training args
+# learning_rate: 1e-3 # 2e-4 for LLM 1e-3 for MMP (projector)
+# warmup_ratio: 0.03        # Warmup ratio for learning rate scheduler
+# lr_scheduler_type: "cosine"
 
-# # best online winner (InternVL4Drive)
-# learning_rate: 2e-5
+# best online winner (InternVL4Drive) - NJU
+learning_rate: 2e-5
 
-# # best offline winner (llava1.6-lora(llama_only))
+# # best offline winner (llava1.6-lora(llama_only)) - CPS
 # learning_rate: 2e-5
 # warmup_ratio: 0.03             # MATCHES: First 3% of training steps
 # lr_scheduler_type: "cosine"

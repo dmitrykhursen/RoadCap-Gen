@@ -4,7 +4,7 @@
 
 # output settings
 output_dir: "output/inference"
-output_file: "drivelm_pred_forHF.json"
+output_file: "drivelm_pred_for_HF_test_qas.json"
 
 # --- MODEL LOADING STRATEGY ---
 # Options: "pretrained" (baseline), "fullfinetune", "adapter" (PEFT)
@@ -26,10 +26,10 @@ tokenizer_path: "llava-hf/llava-v1.6-mistral-7b-hf"
 
 num_workers: 4
 batch_size: 8
-split: "val" # for local evaluation (10% val data) (we have Qs and gt As)
+# split: "val" # for local evaluation (10% val data) (we have Qs and gt As)
 # split: "test" # for local testing (10% test data) (we have Qs and gt As)
-# split: "all_data" # for HF private test server (we have only questions, no gt answers)
-
+split: "all_data" # for HF private test server (we have only questions, no gt answers)
+add_timestamp: false
 
 # Generation settings
 generation:

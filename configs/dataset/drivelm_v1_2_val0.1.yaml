@@ -1,0 +1,8 @@
+name: "drivelm"
+data_path: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/v1_2_val0.1_converted_llama_with_tags.json"
+train_data_path: Null # not used for inference
+image_folder: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/train_val_samples"  
+task: "vqa"
+images_per_frame: "6"
+
+      

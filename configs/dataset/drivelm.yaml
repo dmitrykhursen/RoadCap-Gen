@@ -1,9 +1,23 @@
 name: "drivelm"
 # train + val set
-data_path: "/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/external/DriveLM/challenge/data/v1_1_train_conv2llama_with_tags.json"
+# data_path: "/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/external/DriveLM/challenge/data/v1_1_train_conv2llama_with_tags.json"
 # data_path: "/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/external/DriveLM/challenge/data/v1_1_train_conv2llama.json"
 
-image_folder: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/train_val_samples"  
+
+# train_data_path: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_metadata/v2_0_trainaug_qas_Qwen3-14B_nuscenes_think_no-tracks_dynamic_q_converted.json"
+# train_data_path: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_metadata/v2_0_aug_qas_Qwen3-14B_nuscenes_think_no-tracks_dynamic_q_converted.json"
+train_data_path: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_metadata/v2_0_valaug_qas_Qwen3-14B_nuscenes_think_no-tracks_dynamic_q_converted.json"
+
+
+# train_data_path: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/v1_2_combined_all_converted_llama.json"
+# train_data_path: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/v1_2_train_converted_llama.json"
+
+val_data_path: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/v1_2_val_converted_llama_with_tags.json"
+# val_data_path: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/v1_2_val0.1_converted_llama_with_tags.json"
+
+
+# image_folder: "/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/train_val_samples"
+image_folder: "/scratch/project/eu-25-10/datasets/nuScenes/samples"  
 
 # # test (HF serever) set
 # data_path: "/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/external/DriveLM/challenge/data/v1_1_test_nus_q_only_conv2llama.json"
