@@ -51,6 +51,12 @@ def main(cfg):
             group=cfg.model.name,
             job_type="finetune",
         )
+        
+        # force WandB to align all metrics to 'epoch' 
+        wandb.define_metric("epoch") # Define the primary x-axis
+        wandb.define_metric("train/*", step_metric="epoch") # Align training metrics
+        wandb.define_metric("eval/*", step_metric="epoch")  # Align evaluation metrics
+        wandb.define_metric("eval_loss", step_metric="epoch") # Catch-all for bare eval_loss
 
     # 1. load Tokenizer
     if global_rank == 0: print(f"Loading generic tokenizer...")
@@ -75,13 +81,23 @@ def main(cfg):
         
     if global_rank == 0: print(f"Loading Datasets...")
     
+    # FOR WHOLE TRAIN DATASET ONLY
     train_dataset = build_dataset(
         cfg=cfg,
         tokenizer=tokenizer,
         image_processor=image_processor,
-        split="train",
+        split="all_data", # use all available data for training 
         data_usage=cfg.training.data_usage
     )
+    
+    # for test/val split (default: (80/20))
+    # train_dataset = build_dataset(
+    #     cfg=cfg,
+    #     tokenizer=tokenizer,
+    #     image_processor=image_processor,
+    #     split="train",
+    #     data_usage=cfg.training.data_usage
+    # )
 
     eval_dataset = build_dataset(
         cfg=cfg,
@@ -99,32 +115,65 @@ def main(cfg):
     # 6. Training Arguments
     use_bf16 = getattr(cfg.training, "bf16", False)
 
+    # set how frequently to log/eval/save
+    epochs = cfg.training.epochs
+    # Define how many times PER EPOCH you want things to happen
+    evals_per_epoch = 4
+    saves_per_epoch = 4
+    # Convert to fractions of the ENTIRE training run
+    eval_fraction = 1.0 / (epochs * evals_per_epoch)
+    save_fraction = 1.0 / (epochs * saves_per_epoch)
+
+    # # Catch optional arguments in a dictionary
+    # optional_args = {}
+    # # Safely check if 'lr_scheduler_type' exists in the config
+    # if hasattr(cfg.training, "lr_scheduler_type") and cfg.training.lr_scheduler_type is not None:
+    #     optional_args["lr_scheduler_type"] = cfg.training.lr_scheduler_type
+
     training_args = TrainingArguments(
         output_dir=f"output/{cfg.model.name}/{cfg.experiment_name}",
-        report_to="wandb" if global_rank == 0 else "none", # Only log from main process
+        report_to="wandb",
         run_name=cfg.experiment_name,
         per_device_train_batch_size=cfg.training.batch_size,
         gradient_accumulation_steps=cfg.training.grad_accumulation,
         learning_rate=cfg.training.learning_rate,
         num_train_epochs=cfg.training.epochs,
-        logging_steps=cfg.training.logging_steps,
-        logging_strategy="steps",
         bf16=use_bf16,
         fp16=not use_bf16,
         dataloader_num_workers=cfg.training.num_workers,
         remove_unused_columns=False, 
         gradient_checkpointing=cfg.training.grad_checkpointing,
         warmup_ratio=cfg.training.warmup_ratio,
+        lr_scheduler_type=cfg.training.lr_scheduler_type,
         per_device_eval_batch_size=cfg.training.batch_size * 2,
+        dataloader_drop_last=True,
 
-        eval_strategy="epoch",  # Run eval every epoch
-        save_strategy="epoch",
-        # metric_for_best_model="eval_loss", 
-        # greater_is_better=False,
+
+        # train/val per epoch strategy 
+        # eval_strategy="epoch",  # Run eval every epoch
+        # save_strategy="epoch",
+
+        # train/val per steps strategy 
+        logging_strategy="steps",
+        logging_steps=cfg.training.logging_steps,    
+        # eval_strategy="steps",
+        # eval_steps=eval_fraction,
+        save_strategy="steps",
+        save_steps=save_fraction,
+
+
+        # save only a few trained checkpoints
+        # save_total_limit=5,         
+        # load_best_model_at_end=True,     # Always keep the #1 best checkpoint safe
+        # metric_for_best_model="eval_drivelm_final_score", # The exact key returned by your custom eval
+        # greater_is_better=True,
         
         # KEY DDP SETTINGS
         ddp_find_unused_parameters=False, # Essential for PEFT/LoRA
-        local_rank=local_rank,            
+        local_rank=local_rank,  
+
+        # unpack optional args
+        # **optional_args          
     )
 
     processor = AutoProcessor.from_pretrained(cfg.model.path, use_fast=True)
@@ -140,23 +189,23 @@ def main(cfg):
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
+        # eval_dataset=eval_dataset,
         processing_class=processor,
         data_collator=collator,
         mode="simple"
     )
 
     # Epoch 0 (Baseline / pretrained model) Evaluation ---
-    if global_rank == 0: 
-        print("📊 Running Pre-training Baseline Evaluation (Epoch 0)...")
-    
-    # Note: We run this outside the 'if rank == 0' check because in DDP, 
-    # all GPUs must participate in the standard HF evaluation loop to prevent deadlocks.
-    trainer.evaluate()
-    # ------------------------------------------
+    # if global_rank == 0: 
+    #     print("📊 Running Pre-training Baseline Evaluation (Epoch 0)...")
+    # # Ensure Trainer knows it's at epoch 0 so it logs correctly to WandB
+    # trainer.state.epoch = 0.0
+    # # Note: We run this outside the 'if rank == 0' check because in DDP, 
+    # # all GPUs must participate in the standard HF evaluation loop to prevent deadlocks.
+    # trainer.evaluate()
 
+    # start training loop
     if global_rank == 0: print("🚀 Starting Training Loop...")
-    
     trainer.train()
 
     if global_rank == 0: print("Finished.")

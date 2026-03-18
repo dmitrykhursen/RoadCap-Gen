@@ -22,7 +22,7 @@ def build_model(cfg):
             )
             print(f"Loaded  Model: {cfg.model.path}")
 
-        elif cfg.inference.load_mode == "fullfinetune":
+        elif cfg.inference.load_mode == "finetune":
             model = RoadCapLLaVA.from_pretrained(
                 cfg.inference.checkpoint_model,
                 dtype=compute_dtype,

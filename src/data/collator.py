@@ -18,6 +18,7 @@ class RoadCapCollator:
         img_paths = []
         questions = []
         tags = []
+        ids = []
 
         # 2. Build prompts + collect images and metadata
         for ex in examples:
@@ -31,6 +32,7 @@ class RoadCapCollator:
             img_paths.append(ex.get("img_path", "unknown"))
             questions.append(ex.get("question", ""))
             tags.append(ex.get("tag", [-1]))
+            ids.append(ex.get("id", -1))
 
             conversation = [
                 {
@@ -70,6 +72,7 @@ class RoadCapCollator:
         batch["img_paths"] = img_paths
         batch["questions"] = questions
         batch["tags"] = tags
+        batch["ids"] = ids
 
         # 6. Convert BatchEncoding to a standard dict 
         return dict(batch)
