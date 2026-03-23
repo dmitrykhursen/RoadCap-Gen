@@ -1,20 +1,16 @@
 import argparse
-import atexit
 import json
 import os
 import random
-import tempfile
+import traceback
 from bisect import bisect_left
 from pathlib import Path
 
-import demjson3
-import numpy as np
 import regex as re
 import torch
 import wandb
 import yaml
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm import LLM, SamplingParams
 
 # =============================================
@@ -59,9 +55,7 @@ def get_past(tracks, frames, current_frame, frames_back):
     return window, missing
 
 
-def detections_to_text(
-    data, tracks_by_object_id=None, frame=None, frames_back=3, track_type="m", include_tracks=False, dataset_name="valeo"
-):
+def detections_to_text(data, tracks_by_object_id=None, frame=None, frames_back=3, track_type="m", include_tracks=False, dataset_name="valeo"):
     if frame is None:
         raise ValueError("Frame must be provided to extract frame number.")
     if dataset_name == "valeo":
@@ -74,9 +68,7 @@ def detections_to_text(
     lines = ["Here is the list of objects detected in the scene. Use them to generate the QA pairs:"]
     for category, cat_objs in data["categories"].items():
         for idx, cat_obj in enumerate(cat_objs["objects"]):
-            line = (
-                f"- {category}_{idx}:\n\t - current bbox: {cat_obj['bbox']}\n\t - current middle point: {cat_obj['mid_point']}."
-            )
+            line = f"- {category}_{idx}:\n\t - current bbox: {cat_obj['bbox']}\n\t - current middle point: {cat_obj['mid_point']}."
             if include_tracks and tracks_by_object_id:
                 tracks = tracks_by_object_id.get(cat_obj["id"])
                 if tracks:
@@ -218,30 +210,33 @@ def get_output_dir_from_nuscenes_folder(input_folder_path, args_out_dir, input_r
 # =============================================
 
 
-class ModelResponder:
-    def __init__(self, model, tokenizer, model_name, thinking=True):
-        self.model = model
-        self.tokenizer = tokenizer
-        self.thinking = thinking
-        self.model_name = model_name.lower()
+# class ModelResponder:
+#     def __init__(self, model, tokenizer, model_name, thinking=True):
+#         self.model = model
+#         self.tokenizer = tokenizer
+#         self.thinking = thinking
+#         self.model_name = model_name.lower()
 
-    def generate(self, messages, max_new_tokens=2048):
-        text = self.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True, enable_thinking=self.thinking
-        )
-        inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
-        generated_ids = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
-        output_ids = generated_ids[0][len(inputs.input_ids[0]) :].tolist()
+#     def generate(self, messages, max_new_tokens=2048):
+#         text = self.tokenizer.apply_chat_template(
+#             messages,
+#             tokenize=False,
+#             add_generation_prompt=True,
+#             enable_thinking=self.thinking,
+#         )
+#         inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+#         generated_ids = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
+#         output_ids = generated_ids[0][len(inputs.input_ids[0]) :].tolist()
 
-        THINK_END = 151668
-        try:
-            idx = len(output_ids) - output_ids[::-1].index(THINK_END)
-        except ValueError:
-            idx = 0
+#         THINK_END = 151668
+#         try:
+#             idx = len(output_ids) - output_ids[::-1].index(THINK_END)
+#         except ValueError:
+#             idx = 0
 
-        thinking_text = self.tokenizer.decode(output_ids[:idx], skip_special_tokens=True).strip()
-        content = self.tokenizer.decode(output_ids[idx:], skip_special_tokens=True).strip()
-        return thinking_text, content
+#         thinking_text = self.tokenizer.decode(output_ids[:idx], skip_special_tokens=True).strip()
+#         content = self.tokenizer.decode(output_ids[idx:], skip_special_tokens=True).strip()
+#         return thinking_text, content
 
 
 class ModelRespondervllm:
@@ -293,8 +288,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="Qwen/Qwen3-14B")
     parser.add_argument("--thinking", action="store_true")
-    parser.add_argument("--use_wandb", action="store_true")
-    parser.add_argument("--wandb_name", type=str, default="QA-Gen")
+    # parser.add_argument("--use_wandb", action="store_true")
+    # parser.add_argument("--wandb_name", type=str, default="QA-Gen")
     parser.add_argument("--start_idx", type=int, default=0)
     parser.add_argument("--end_idx", default=None)
     parser.add_argument("--use_tracks", action="store_true")
@@ -321,17 +316,13 @@ if __name__ == "__main__":
     config_prompts = config["prompts"]
     directions = ["Turn right.", "Drive backward.", "Going ahead.", "Turn left."]
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
-    model = AutoModelForCausalLM.from_pretrained(args.model, dtype="auto", device_map="auto")
-    # responder = ModelResponder(model, tokenizer, args.model, thinking=args.thinking)
-
-    responder = ModelRespondervllm(args.model, thinking=args.thinking)
 
     # 1. Get all nested scene folders
     all_scene_paths = list_drive_lm_scenes(args.yolo_path)
     total_scenes = len(all_scene_paths)
     print(f"Found {total_scenes} total scenes.")
 
+    responder = ModelRespondervllm(args.model, thinking=args.thinking)
     # 2. Iterate with Progress Counter
     for iz, scene_folder in enumerate(all_scene_paths):
         # Output directory parsing
@@ -409,9 +400,7 @@ if __name__ == "__main__":
 
                 with torch.inference_mode():
                     for i, q in enumerate(questions):
-                        prompt = generate_prompt(
-                            q, None, scene_text, config_prompts, directions, args.use_tracks, args.track_type
-                        )
+                        prompt = generate_prompt(q, None, scene_text, config_prompts, directions, args.use_tracks, args.track_type)
                         if used_objs and "<obj>" in q:
                             prompt += f"\nAvoid reusing: {', '.join(sorted(used_objs))}"
 
@@ -423,22 +412,24 @@ if __name__ == "__main__":
                             if not clean_content.startswith("{"):
                                 clean_content = "{" + f'"Question_{i}": ' + clean_content + "}"
                             parsed = json.loads(clean_content)
-                            # TODO: add image path to the results, so that we can parse it out later
                             scene_results.update(parsed)
                             used_objs.update(re.findall(pattern, content))
-                        except:
+                        except Exception as e:
+                            print(f"Error parsing content for question {i}: {e}")
                             continue
 
                 append_json_line(str(output_file), {scene_id: scene_results})
 
         except Exception as e:
             print(f"❌ Error in [{iz + 1}/{total_scenes}] {scene_folder}: {e}")
+            print(f"CAM {cam} FRAME {frame_idx}")
+            traceback.print_exc()
 
     print("Job complete.")
 
 
 # salloc -A eu-25-10 -p qgpu_exp --gpus-per-node 1 -t 1:00:00 --nodes 1
-# salloc -A OPEN-36-7 -p qgpu_exp --gpus-per-node 1 -t 1:00:00 --nodes 1
+# salloc -A OPEN-36-38 -p qgpu_exp --gpus-per-node 1 -t 1:00:00 --nodes 1
 
 # source /mnt/proj1/eu-25-10/envs/roadcap-gen/bin/activate
 # PYTHONPATH=. python scripts/01_pseudo_labels_gen/pseudo_qas_generation.py --model="Qwen/Qwen3-14B" --wandb_name="QWEN-14B-non-thinking" --file_name="debug_QA_qwen_non_thinking" --qas_ratios "configs/dataset/qas_drivelm_ratios.json" --prompts_config "configs/inference/llm_prompt_config.yaml" --output_folder "data/qas_gen_output/"
