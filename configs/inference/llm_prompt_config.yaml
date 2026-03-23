@@ -246,15 +246,6 @@ prompts:
     smaller cy = farther away  
     larger cy = closer to ego vehicle  
 
-    Horizontal zones (approx):
-    - Left: cx < 979
-    - Ahead: 979 < cx < 1468
-    - Right: cx > 1468
-
-    Ego vehicle:
-        - bounding box [0, 1620, 1600, 428], midpoint [800, 1834]
-        - always at bottom middle-left, partially visible, moving forward along the y axis
-
     Bounding box format:
       [x, y, width, height]
 
@@ -274,28 +265,42 @@ prompts:
     The reasoning MUST include spatial analysis.
     The short_answer MUST be brief (yes/no or 1-2 sentences).
 
-  tracks_m: |
+  valeo_dataset_car_in_view: |
+    Ego vehicle:
+      - bounding box [0, 1620, 1600, 428], midpoint [800, 1834]
+      - always at bottom middle-left, partially visible, moving forward along the y axis
+
+  valeo_tracks_m: |
     You are also provided consecutive 3D relative position measurements in meters, measured from the ego vehicle sensor from previous frames.
     Each position is formatted as [x, y, z] with the following coordinate system:
     - x < 0 left of ego vehicle, x > 0 right of ego vehicle
     - y < 0 below sensor, y > 0 above sensor (sensor is mounted on the roof of the car about 1.5 meters high)
     - z > 0 forward distance only (measured parallel to the ground from the sensor)
 
+  nuscenes_tracks_m: |
+    You are also provided consecutive 3D relative position measurements in meters, measured from the ego vehicle sensor from previous frames.
+    Each position is formatted as [x, y, z, distance] with the following coordinate system:
+    - x < 0 left of ego vehicle, x > 0 right of ego vehicle
+    - y < 0 below sensor, y > 0 above sensor (sensor is mounted on the roof of the car about 1.5 meters high)
+    - z > 0 forward distance only (measured parallel to the ground from the sensor)
+
+  tracks_m: |
     The positions are time-ordered from oldest to newest with 55 milliseconds between frames.
-    EXAMPLES:
-    - A position of [-1.5, 0.0, 10.0] means the object was 1.5 meters to the left of the ego vehicle and 10.0 meters ahead.
-    - [1.83, -2.48, 69.18] at t-165 ms, [1.81, -2.51, 69.18] at t-110 ms, [1.35, -2.37, 69.04] at t-55 ms, [1.35, -2.26, 69.04] at t-0 ms. means the object was 1.83 meters to the right, 2.48 meters below, and 69.18 meters ahead 165 milliseconds ago; 1.81 meters to the right, 2.51 meters below, and 69.18 meters ahead 110 milliseconds ago; 1.35 meters to the right, 2.37 meters below, and 69.04 meters ahead 55 milliseconds ago; and 1.35 meters to the right, 2.26 meters below, and 69.04 meters ahead now.
 
     Special Case: New Objects
     If an object is detected for the first time in the current frame (t=0 ms), it will have no historical measurements. Its entry will use this exact format:
     - relative position at t-0 ms: [x, y, z]. No prior frames available.
-    EXAMPLES:
-    - relative position at t-0 ms: [-3.94, -0.48, 61.56]. No prior frames available.
-    This means the object is 3.94 meters to the left, 0.48 meters below, and 61.56 meters ahead of the ego vehicle in the current frame, with no previous data.
 
-    RULES FOR QA GENERATION:
-    - Never calculate velocity/direction for these objects (insufficient data).
-    - Prioritize objects with history for motion-based questions unless the query specifically references new objects.
+
+    Prioritize objects with history for motion-based questions unless the query specifically references new objects.
+
+  tracks_fewshot: |
+    EXAMPLES:
+      - A position of [-1.5, 0.0, 10.0] means the object was 1.5 meters to the left of the ego vehicle and 10.0 meters ahead.
+      - [1.83, -2.48, 69.18] at t-165 ms, [1.81, -2.51, 69.18] at t-110 ms, [1.35, -2.37, 69.04] at t-55 ms, [1.35, -2.26, 69.04] at t-0 ms. means the object was 1.83 meters to the right, 2.48 meters below, and 69.18 meters ahead 165 milliseconds ago; 1.81 meters to the right, 2.51 meters below, and 69.18 meters ahead 110 milliseconds ago; 1.35 meters to the right, 2.37 meters below, and 69.04 meters ahead 55 milliseconds ago; and 1.35 meters to the right, 2.26 meters below, and 69.04 meters ahead now.
+    EXAMPLES:
+      - relative position at t-0 ms: [-3.94, -0.48, 61.56]. No prior frames available.
+      This means the object is 3.94 meters to the left, 0.48 meters below, and 61.56 meters ahead of the ego vehicle in the current frame, with no previous data.
 
   tracks_px: |
     You are also provided consecutive middle point positions from previous frames.
