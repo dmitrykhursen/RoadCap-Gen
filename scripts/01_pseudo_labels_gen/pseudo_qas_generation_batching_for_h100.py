@@ -30,9 +30,9 @@ except ImportError:
 # =============================================
 
 
-def get_prefixed_permutation(options: List[str]) -> List[str]:
+def get_prefixed_permutation(options: List[str], rng: random.Random) -> List[str]:
     permuted = options.copy()
-    random.shuffle(permuted)
+    rng.shuffle(permuted)
     letters = ["A. ", "B. ", "C. ", "D. "]
     return [f"{letters[i]}{item}" for i, item in enumerate(permuted)]
 
@@ -198,6 +198,7 @@ def generate_prompt(
     objects: str,
     config_prompts: Dict[str, str],
     directions: List[str],
+    rng: random.Random,
     tracks: bool = False,
     track_type: str = "m",
 ) -> str:
@@ -218,7 +219,7 @@ def generate_prompt(
     if description:
         parts.append(f"\nThe scene description is:\n {description}")
     if "following options:" in q:
-        q += " " + " ".join(get_prefixed_permutation(directions))
+        q += " " + " ".join(get_prefixed_permutation(directions, rng))
 
     parts.append(f"\nThe question to use is:\n {q}\n")
     return "\n".join(parts)
@@ -353,21 +354,21 @@ class ModelRespondervllm:
             results.append((think, answer.strip()))
 
         return results
-
+    
     def generate_batch(self, batch_messages: List[List[Dict[str, str]]], chunk_size: int = 2):
         """Processes massive batches by chunking them to avoid OOM spikes, preserving original order."""
         all_results = []
-
+        
         for i in range(0, len(batch_messages), chunk_size):
             chunk = batch_messages[i : i + chunk_size]
-
+            
             outputs = self.llm.chat(
-                chunk,  # type: ignore
+                chunk, # type: ignore
                 self.sampling_params,
-                use_tqdm=True,
+                use_tqdm=True, 
                 chat_template_kwargs={"enable_thinking": self.thinking},
             )
-
+            
             for out in outputs:
                 text = out.outputs[0].text
                 if "</think>" in text:
@@ -375,9 +376,9 @@ class ModelRespondervllm:
                     think = think.replace("<think>", "").strip()
                 else:
                     think, answer = "", text.strip()
-
+                    
                 all_results.append((think, answer.strip()))
-
+                
         return all_results
 
 
@@ -415,12 +416,12 @@ def parse_args():
     parser.add_argument("--prompts_config", type=str, required=True)
     parser.add_argument("--dataset_name", type=str, default="nuscenes")
     parser.add_argument("--number_of_questions", type=int, default=15)
-    parser.add_argument("--frames_back", type=int, default=2)  # 2 back and the current so 3
+    parser.add_argument("--frames_back", type=int, default=3)
     parser.add_argument("--tracks_path", type=str, default=None)
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing results")
 
-    parser.add_argument("--scene_idx_start", type=int, default=None)
-    parser.add_argument("--scene_idx_end", type=int, default=None)
+    parser.add_argument("--chunk_id", type=int, default=0, help="Which chunk this worker processes (0-indexed)")
+    parser.add_argument("--num_chunks", type=int, default=1, help="Total number of workers/chunks")
     return parser.parse_args()
 
 
@@ -442,20 +443,33 @@ def main():
     total_scenes = len(all_scenes)
     print(f"Found {len(cameras)} cameras and {total_scenes} total scenes.")
     all_scenes = sorted(all_scenes)
-    if args.scene_idx_start is not None and args.scene_idx_end is not None:
-        if args.scene_idx_end > total_scenes:
-            print(f"scene_idx_end {args.scene_idx_end} is greater than total scenes {total_scenes}. Adjusting to {total_scenes}.")
-            args.scene_idx_end = total_scenes
-        all_scenes = all_scenes[args.scene_idx_start : args.scene_idx_end]
-        print(f"Filtering scenes to index range: [{args.scene_idx_start}, {args.scene_idx_end})")
+
+    # --- CHUNKING LOGIC ---
+    chunk_size = math.ceil(total_scenes / args.num_chunks)
+    start_idx = args.chunk_id * chunk_size
+    end_idx = min(start_idx + chunk_size, total_scenes)
+
+    my_scene_paths = all_scenes[start_idx:end_idx]
+    print(f"Worker {args.chunk_id + 1}/{args.num_chunks} taking scenes {start_idx} to {end_idx - 1} ({len(my_scene_paths)} total).")
 
     responder = ModelRespondervllm(args.model, thinking=args.thinking)
 
-    for scene_idx, scene_name in tqdm(enumerate(all_scenes), total=total_scenes):
+    # Iterate through ONLY your chunk of scenes
+    for local_idx, scene_name in tqdm(enumerate(my_scene_paths), total=len(my_scene_paths), desc=f"Worker {args.chunk_id + 1}/{args.num_chunks}"):
+        scene_idx = start_idx + local_idx  # Global scene index for accurate logging
+
         # Output directory parsing
         output_dir = Path(args.output_folder) / scene_name
+        print(f"\n[{scene_idx + 1}/{total_scenes}] Processing: {output_dir}")
+
+        expected_output_file = output_dir / f"qas_{exp_name}.jsonl"
+
+        if expected_output_file.exists() and not args.overwrite:
+            print(f"Skipping: {output_dir} (Already completed)")
+            print(" - - - - - " * 3)
+            continue
+
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_file = output_dir / f"qas_{scene_name}_{exp_name}.jsonl"
 
         try:
             # ---- Load Multi-Camera Files & Merge Data ----
@@ -469,6 +483,16 @@ def main():
                 cam_json_files[cam] = jsons
                 cam_files_lens.append(len(jsons))
 
+                processed_json = cam_dir / "merged_processed.json"
+                if not processed_json.exists():
+                    if run_yolo_processing is None:
+                        raise ImportError("run_yolo_processing could not be imported. Ensure src.utils.qas_generation_helper exists.")
+
+                    cam_merged_data[cam] = run_yolo_processing(input_path=str(cam_dir), output_path=str(cam_dir), dataset_name=args.dataset_name)
+                else:
+                    with open(processed_json, "r", encoding="utf-8") as f:
+                        cam_merged_data[cam] = json.load(f)
+
             ref_cam = cameras[0]
             if len(set(cam_files_lens)) != 1:
                 print(f"Warning: Different number of frames across cameras for {scene_name}. Numbers differ: {cam_files_lens}. Skipping.")
@@ -478,25 +502,6 @@ def main():
             if num_frames == 0:
                 print(f"No frames found for {scene_name} in {ref_cam}. Skipping.")
                 continue
-
-            # Check for existing progress to resume mid-scene
-            processed_frames = set()
-            if output_file.exists() and not args.overwrite:
-                with open(output_file, "r", encoding="utf-8") as f:
-                    for line in f:
-                        try:
-                            data = json.loads(line.strip())
-                            processed_frames.update(data.keys())
-                        except Exception:
-                            pass  # Skip corrupted lines
-
-                if len(processed_frames) >= num_frames:
-                    print(f"[{scene_idx + 1}/{total_scenes}] Skipping: {scene_name} (Fully processed {len(processed_frames)}/{num_frames} frames)")
-                    continue
-                else:
-                    print(f"[{scene_idx + 1}/{total_scenes}] Resuming: {scene_name} ({len(processed_frames)}/{num_frames} frames done)")
-            else:
-                print(f"[{scene_idx + 1}/{total_scenes}] Processing: {scene_name}")
 
             # ---- Load Tracks ----
             tracks_by_id = None
@@ -510,77 +515,141 @@ def main():
                 tracks_by_id = {d["object_id"]: d for d in cleaned_tracks["tracks"]}
 
             q_dist = distribute_by_ratio(q_ratios, num_frames * args.number_of_questions)
+
+            # --- Batched Output Generation with Checkpointing ---
+            output_file = output_dir / f"qas_{exp_name}.jsonl"
+            checkpoint_file = output_dir / f"checkpoint_{exp_name}.json"
             pattern = r"\b\w+_\d+\b"
+            # items = sorted(data.items())
 
-            for frame_idx in tqdm(range(num_frames), desc=f"Frames for {scene_name}"):
-                frame_master_id = cam_json_files[ref_cam][frame_idx].stem
-                if frame_master_id in processed_frames:
-                    continue
+            frame_states = []
+            start_q_idx = 0
 
-                combined_scene_text = ["Here is the list of objects detected in the scene from all cameras. Use them to generate the QA pairs:"]
-                for cam in cameras:
-                    cam_dir = Path(args.yolo_path) / cam / scene_name
-                    processed_json = cam_dir / "merged_processed.json"
-                    if not processed_json.exists():
-                        if run_yolo_processing is None:
-                            raise ImportError("run_yolo_processing could not be imported. Ensure src.utils.qas_generation_helper exists.")
+            if checkpoint_file.exists():
+                print(f"Found checkpoint for {scene_name}. Resuming...")
+                with open(checkpoint_file, "r", encoding="utf-8") as f:
+                    chkpt = json.load(f)
+                start_q_idx = chkpt["next_q_idx"]
+                frame_states = chkpt["frame_states"]
 
-                        data = run_yolo_processing(input_path=str(cam_dir), output_path=str(cam_dir), dataset_name=args.dataset_name)
-                    else:
-                        with open(processed_json, "r", encoding="utf-8") as f:
-                            data = json.load(f)
+                for state in frame_states:
+                    state["used_objs"] = set(state["used_objs"])
+            else:
+                for frame_idx in range(num_frames):
+                    # Use the reference camera to define the universal scene_id/frame name
+                    frame_filename = cam_json_files[ref_cam][frame_idx].name
+                    scene_id = frame_filename.replace(".json", "")
 
-                    frame_stem = cam_json_files[cam][frame_idx].stem
-                    cam_data = cam_merged_data[cam][frame_stem + ".jpg"]
+                    combined_scene_text = ["Here is the list of objects detected in the scene from all cameras. Use them to generate the QA pairs:"]
+                    for cam in cameras:
+                        frame_stem = cam_json_files[cam][frame_idx].stem
+                        cam_data = cam_merged_data[cam].get(frame_stem + ".jpg", {})
 
-                    cam_text = detections_to_text(
-                        data=cam_data,
-                        camera_name=cam,
-                        tracks_by_object_id=tracks_by_id,
-                        timestamp_to_frame=timestamp_to_frame,
-                        frame=frame_stem,
-                        frames_back=args.frames_back,
-                        track_type=args.track_type,
-                        include_tracks=args.use_tracks,
-                        dataset_name=args.dataset_name,
-                    )
-                    if cam_text.strip():
-                        combined_scene_text.append(cam_text)
-
-                final_scene_text = "\n".join(combined_scene_text)
-
-                # Create a deterministic seed based on the scene
-                rng = random.Random(f"{scene_name}_{frame_idx}")
-
-                questions = ["What are the important objects in the current scene?"] + random_permutation(
-                    q_dist, args.number_of_questions - 1, args.number_of_questions - 1, rng
-                )
-
-                scene_results = {}
-                used_objs = set()
-                with torch.inference_mode():
-                    for i, q in enumerate(questions):
-                        prompt = generate_prompt(q, None, final_scene_text, config_prompts, directions, args.use_tracks, args.track_type)
-                        if used_objs and "<obj>" in q:
-                            prompt += f"\nAvoid reusing: {', '.join(sorted(used_objs))}"
-
-                        messages = [{"role": "user", "content": prompt}]
-                        _, content = responder.generate(messages)
-                        try:
-                            clean_content = content.strip()
-                            clean_content = "{" + f'"Question_{i}": ' + clean_content + "}"
-                            parsed = json.loads(clean_content)
-                            scene_results.update(parsed)
-                            used_objs.update(re.findall(pattern, content))
-                        except json.JSONDecodeError as e:
-                            print(f"[Warning] JSON decode error for {scene_name} frame {frame_idx} question {i}: {e}")
+                        if not cam_data:
                             continue
 
-                append_json_line(str(output_file), {frame_master_id: scene_results})
+                        cam_text = detections_to_text(
+                            data=cam_data,
+                            camera_name=cam,
+                            tracks_by_object_id=tracks_by_id,
+                            timestamp_to_frame=timestamp_to_frame,
+                            frame=scene_id,
+                            frames_back=args.frames_back,
+                            track_type=args.track_type,
+                            include_tracks=args.use_tracks,
+                            dataset_name=args.dataset_name,
+                        )
+                        if cam_text.strip():
+                            combined_scene_text.append(cam_text)
+
+                    final_scene_text = "\n".join(combined_scene_text)
+
+                    # Create a deterministic seed based on the unique scene_id
+                    rng = random.Random(f"{scene_name}_{scene_id}")
+
+                    questions = ["What are the important objects in the current scene?"] + random_permutation(
+                        q_dist, args.number_of_questions - 1, args.number_of_questions - 1, rng
+                    )
+
+                    frame_states.append(
+                        {"scene_id": scene_id, "scene_text": final_scene_text, "questions": questions, "used_objs": set(), "results": {}}
+                    )
+
+            if start_q_idx < args.number_of_questions:
+                print(f"Loaded {len(frame_states)} frames. Batching questions {start_q_idx + 1} to {args.number_of_questions}...")
+
+            all_token_counts = []
+            # 2. Iterate horizontally across all frames by Question Index
+            with torch.inference_mode():
+                for q_idx in range(start_q_idx, args.number_of_questions):
+                    batch_messages = []
+                    batch_token_counts = []
+
+                    # Build the prompt batch
+                    for state in frame_states:
+                        q = state["questions"][q_idx]
+
+                        # Use the same deterministic seed for prompt generation (e.g., shuffling multiple choice)
+                        rng = random.Random(f"{scene_name}_{state['scene_id']}_Q{q_idx}")
+
+                        prompt = generate_prompt(q, None, state["scene_text"], config_prompts, directions, rng, args.use_tracks, args.track_type)
+
+                        if state["used_objs"] and "<obj>" in q:
+                            prompt += f"\nAvoid reusing: {', '.join(sorted(state['used_objs']))}"
+                        batch_messages.append([{"role": "user", "content": prompt}])
+                        # Estimate tokens
+                        tok_len = estimate_prompt_tokens(responder, prompt, thinking=responder.thinking)
+                        batch_token_counts.append(tok_len)
+                    print(f"\n--- Processing Question {q_idx + 1}/{args.number_of_questions} for {len(frame_states)} frames ---")
+                    all_token_counts.append(batch_token_counts)
+                    continue
+                    # Send entire batch to VLLM
+                    batch_outputs = responder.generate_batch(batch_messages)
+
+                    # 3. Parse outputs and update state
+                    for state, (think, content) in zip(frame_states, batch_outputs):
+                        try:
+                            clean_content = content.strip()
+                            clean_content = "{" + f'"Question_{q_idx}": ' + clean_content + "}"
+
+                            parsed = json.loads(clean_content)
+                            state["results"].update(parsed)
+                            state["used_objs"].update(re.findall(pattern, content))
+                        except json.JSONDecodeError as e:
+                            print(f"[Warning] JSON decode error for {state['scene_id']} Q{q_idx}: {e}")
+                            continue
+
+                    # 4. Save Checkpoint after the batch finishes
+                    # We copy and convert sets to lists to be JSON serializable
+                    chkpt_state = []
+                    for state in frame_states:
+                        s_copy = state.copy()
+                        s_copy["used_objs"] = list(state["used_objs"])
+                        chkpt_state.append(s_copy)
+
+                    with open(checkpoint_file, "w", encoding="utf-8") as f:
+                        json.dump({"next_q_idx": q_idx + 1, "frame_states": chkpt_state}, f)
+
+            # max tokens across all prompts for this question
+            max_tokens_per_question = [max(batch) for batch in all_token_counts]
+
+            # absolute worst-case across all questions and frames
+            max_tokens_overall = max(max_tokens_per_question)
+
+            print(f"Estimated worst-case input tokens: {max_tokens_overall}")
+            continue
+            # 5. Write all completed frames to the JSONL file once the scene is entirely done
+            for state in frame_states:
+                append_json_line(str(output_file), {state["scene_id"]: state["results"]})
+
+            # 6. Clean up the checkpoint file
+            if checkpoint_file.exists():
+                checkpoint_file.unlink()
 
         except Exception as e:
             print(f"❌ Error in [{scene_idx + 1}/{total_scenes}] {scene_name}: {e}")
             traceback.print_exc()
+            exit()
     print("Job complete.")
 
 

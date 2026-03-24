@@ -125,10 +125,8 @@ prompts:
         - "ahead of the ego vehicle"
 
     - Use the phrase that correctly describes the position of the referenced object relative to the ego vehicle.
-    - Do NOT leave the token unchanged.
-    - Do NOT invent new phrases.
-    - Include the full phrase exactly as shown, including spaces and quotation marks.
 
+  position_fewshot: |
     EXAMPLES:
     Template:
         Is the pedestrian on the <position>?
@@ -157,8 +155,7 @@ prompts:
     **CRITICAL RULE — REPLACE <obj> TOKENS EXACTLY**
 
     Every time the question template contains <obj>, replace it with:
-
-        <object_id, CAM_FRONT, cx, cy>
+      <object_id, CAM_FRONT, cx, cy>
 
     Where:
     - object_id = EXACT provided object name (example: car_4)
@@ -168,75 +165,60 @@ prompts:
     - NEVER change the order or spacing
     - Each <obj> must use a DIFFERENT object
 
+    **OBJECT SELECTION RULES**
+    - Use ONLY objects from the provided list.
+    - NEVER reuse the same object for multiple <obj> tokens.
+    - Prefer closer objects and vehicles.
+    - Choose objects that make sense for the question.
+
+    Apart from replacing <obj>, do NOT modify the question template in any way.
+
+  obj_fewshot: |
     EXAMPLES:
 
     Correct Example 1:
     Template:
-        What is <obj> doing?
+      What is <obj> doing?
 
     Object:
-        car_2, middle point [1276.5, 924.9]
+      car_2, middle point [1276.5, 924.9]
 
     Correct Output:
-        What is <car_2, CAM_FRONT, 1276.5, 924.9> doing?
+      What is <car_2, CAM_FRONT, 1276.5, 924.9> doing?
 
     Correct Example 2:
     Template:
-        Are <obj> and <obj> close to each other?
+      Are <obj> and <obj> close to each other?
 
     Objects:
-        pedestrian_0, middle [511.8, 981.5]
-        car_3, middle [1085.0, 929.0]
+      pedestrian_0, middle [511.8, 981.5]
+      car_3, middle [1085.0, 929.0]
 
     Correct Output:
-        Are <pedestrian_0, CAM_FRONT, 511.8, 981.5> and <car_3, CAM_FRONT, 1085.0, 929.0> close to each other?
-
+      Are <pedestrian_0, CAM_FRONT, 511.8, 981.5> and <car_3, CAM_FRONT, 1085.0, 929.0> close to each other?
     WRONG EXAMPLES — NEVER DO THESE
-        "car_4"
-        "<car_4>"
-        "<car_4,1031.5,938.5>"
-        "<car_4 CAM_FRONT 1031 938>"
-        Leaving <obj> unchanged
-        Using the same object twice for different <obj> tokens
-        Removing CAM_FRONT
-        Removing parentheses or commas
+      "car_4"
+      "<car_4>"
+      "<car_4,1031.5,938.5>"
+      "<car_4 CAM_FRONT 1031 938>"
+      Leaving <obj> unchanged
+      Using the same object twice for different <obj> tokens
+      Removing CAM_FRONT
+      Removing parentheses or commas
 
     If you output a question like:
         "What actions could cause a collision with car_4?"
     YOU HAVE FAILED THE FORMAT.
-
-    **OBJECT SELECTION RULES**
-    - Use ONLY objects from the provided list.
-    - NEVER invent or hallucinate objects.
-    - NEVER reuse the same object for multiple <obj> tokens.
-    - Prefer larger bounding boxes.
-    - Larger bounding box = closer object.
-    - Prefer vehicles when possible.
-    - Choose objects that make sense for the question.
-
-    Apart from replacing <obj>, do NOT modify the question template in any way.
 
   no_obj: |
     Use the question exactly as provided without any modifications.  
 
   qa_generation_QWEN: |
     **ANSWER RULES**
-    Your answer MUST be supported by:
-    - the object list
-    - bounding box and coordinates
-    - visible spatial relationships
-    - the scene description (secondary, only for overall context. If the description contradicts the object list, trust the object list)
-
-    NEVER hallucinate:
-    - colors
-    - brands
-    - additional objects
-    - signs not listed
+    Your answer MUST be supported by the object list
 
     Do NOT use internal IDs in the answer.
-    Use descriptive phrases like:
-        "a bus on the right side"
-        "a pedestrian ahead on the crosswalk"
+    Use descriptive phrases instead
 
     **COORDINATES AND SPATIAL INTERPRETATION**
     (0,0) = top-left
@@ -249,9 +231,6 @@ prompts:
     Bounding box format:
       [x, y, width, height]
 
-
-    **OUTPUT FORMAT**
-
     Output EXACTLY this JSON structure:
 
     {
@@ -259,7 +238,6 @@ prompts:
         "reasoning": "...",
         "short_answer": "..."
     }
-
 
     The question MUST contain correctly formatted object tags.
     The reasoning MUST include spatial analysis.
@@ -270,14 +248,14 @@ prompts:
       - bounding box [0, 1620, 1600, 428], midpoint [800, 1834]
       - always at bottom middle-left, partially visible, moving forward along the y axis
 
-  valeo_tracks_m: |
+  valeo_tracks_coords_m: |
     You are also provided consecutive 3D relative position measurements in meters, measured from the ego vehicle sensor from previous frames.
     Each position is formatted as [x, y, z] with the following coordinate system:
     - x < 0 left of ego vehicle, x > 0 right of ego vehicle
     - y < 0 below sensor, y > 0 above sensor (sensor is mounted on the roof of the car about 1.5 meters high)
     - z > 0 forward distance only (measured parallel to the ground from the sensor)
 
-  nuscenes_tracks_m: |
+  nuscenes_tracks_coords_m: |
     You are also provided consecutive 3D relative position measurements in meters, measured from the ego vehicle sensor from previous frames.
     Each position is formatted as [x, y, z, distance] with the following coordinate system:
     - x < 0 left of ego vehicle, x > 0 right of ego vehicle
@@ -290,7 +268,6 @@ prompts:
     Special Case: New Objects
     If an object is detected for the first time in the current frame (t=0 ms), it will have no historical measurements. Its entry will use this exact format:
     - relative position at t-0 ms: [x, y, z]. No prior frames available.
-
 
     Prioritize objects with history for motion-based questions unless the query specifically references new objects.
 
