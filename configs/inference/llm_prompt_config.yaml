@@ -1,23 +1,169 @@
 prompts:
   context: |
-    You are given a driving scene captured from the front camera of a car.
-    The scene is 2448 x 2048 (width x height) pixels in size.
-    You are also given a list of detected objects from a YOLO model, including:
-    - object type
-    - bounding box [x, y, width, height]
-    - middle point [cx, cy]
+    You are an AI assistant analyzing a driving scene captured from the cameras and sensors of an autonomous vehicle.
+    Your task is to generate exactly ONE Question/Answer (QA) pair based on a provided question template and a specified objects.
 
-    You must generate exactly one QA pair based on the provided question template and the specified object.
+    ### SCENE CONTEXT
+    - Image Size: 2448 x 2048 (width x height)
 
-  # Used the prompt I found in this repo. Will need a review if we want to use it
-  describe: |
-    Describe the automotive scene using the provided information. Identify each object and its position within the image.
-    Mention the spatial relationships between objects. Avoid specific technical details like pixels, coordinates, or units.
-    Focus on detailing the number of objects detected. Avoid mentioning specific categories, object IDs, or irrelevant details such as traffic light color,
-    traffic sign types or car types. Ensure your description is concise, detailed, and strictly based on the available data.
-    Do not include assumptions or additional information beyond what is provided. Begin directly with describing the objects locations in the scene and their spatial relationships.
+  position: |
+    Whenever the question template contains <position>, replace it with **exactly one** of the following phrases, that describes the position of the referenced object relative to the ego vehicle:
+      - "left side of the ego vehicle"
+      - "right side of the ego vehicle"
+      - "ahead of the ego vehicle"
 
-  qa_generation: |
+  important_objects: |
+    Do not include all objects in your answer. Focus only on the most important objects that influence the driving decision of the ego vehicle.
+
+  obj: |
+    FOLLOW ALL FORMATTING RULES EXACTLY. DO NOT IGNORE THEM.
+
+    **CRITICAL RULE — REPLACE <obj> TOKENS EXACTLY**
+
+    Every time the question template contains <obj>, replace it with:
+      <object_id, camera_name, cx, cy>
+
+    Where:
+    - object_id = EXACT provided object name (example: car_4)
+    - camera_name = The exact camera name where the object was detected
+    - cx, cy = the object's middle point coordinates
+    - must use angle brackets exactly like this: < ... >
+    - NEVER change the order or spacing
+    - Each <obj> must use a DIFFERENT object
+
+    **OBJECT SELECTION RULES**
+    - Use ONLY objects from the provided list.
+    - NEVER reuse the same object for multiple <obj> tokens.
+    - Prefer closer objects and vehicles.
+    - Choose objects that make sense for the question.
+
+    Apart from replacing <obj>, do NOT modify the question template in any way.
+
+  no_obj: |
+    Use the question exactly as provided without any modifications.  
+
+  coordinate_system: |
+    ### COORDINATE SYSTEM & SPATIAL RULES
+    2D Camera Coordinates:
+      - (0,0) = top-left
+      - x increases -> right 
+      - y increases -> down 
+      - smaller cy = farther away 
+      - larger cy = closer to ego vehicle
+
+  answer_rules: |
+    ### ANSWER RULES
+    - Grounding: Your answer MUST be supported by the provided object list.
+    - Prioritization: Focus on vehicles and objects closer to the ego vehicle.
+    - Formatting: Do NOT use internal IDs (e.g., "car_0") in the answer. Use descriptive phrases instead (e.g., "the car on the left").
+    - Output Format: You must output EXACTLY the following JSON structure and nothing else.
+    {
+        "question": "...", // MUST contain correctly formatted object tags
+        "reasoning": "...", // MUST include consice spatial analysis
+        "short_answer": "..." // MUST be brief (yes/no or 1-2 sentences)
+    }
+
+  detected_objects_tracks: |
+    ### DETECTED OBJECTS DATA
+    Use the exact question template provided without modifications.
+    Data Schema: 
+    {"id":"Camera_ObjectType","bbox":[x, y, width, height],"center":[cx, cy],"pos_history":[[x,y,z,d at t-2],[x,y,z,d at t-1],[x,y,z,d at t-0]]}
+    *Note: If an object is new at t=0, pos_history will only contain one array: [x,y,z,d at t-0].*
+
+  detected_objects: |
+    ### DETECTED OBJECTS DATA
+    Use the exact question template provided without modifications.
+    Data Schema: 
+    {"id":"Camera_ObjectType","bbox":[cx, cy, width, height],"center":[cx, cy]}
+
+  valeo_tracks_coords_m: |
+    3D Ego Vehicle Coordinates [x, y, z] in meters:
+    - x < 0 left of ego vehicle, x > 0 right of ego vehicle
+    - y < 0 below sensor, y > 0 above sensor (sensor is mounted on the roof of the car about 1.5 meters high)
+    - z > 0 forward distance only (measured parallel to the ground from the sensor)
+    the position history is captured every 55 ms
+
+  nuscenes_tracks_coords_m: |
+    3D Ego Vehicle Coordinates (nuScenes format: [x, y, z, distance in meters]):
+    - x > 0: forward (in front of ego), x < 0: backward
+    - y > 0: left of ego, y < 0: right
+    - z > 0: up, z < 0: down
+    - distance: Euclidean distance from ego vehicle
+    the position history is captured roughly every 500 ms
+
+  valeo_dataset_car_in_view: |
+    Ego vehicle:
+    - bounding box [0, 1620, 1600, 428], midpoint [800, 1834]
+    - always at bottom middle-left, partially visible, moving forward along the y axis in the image coordinates
+
+fewshot:
+  tracks_m: |
+    EXAMPLES:
+      - A position of [-1.5, 0.0, 10.0] means the object was 1.5 meters to the left of the ego vehicle and 10.0 meters ahead.
+      - [1.83, -2.48, 69.18] at t-165 ms, [1.81, -2.51, 69.18] at t-110 ms, [1.35, -2.37, 69.04] at t-55 ms, [1.35, -2.26, 69.04] at t-0 ms. means the object was 1.83 meters to the right, 2.48 meters below, and 69.18 meters ahead 165 milliseconds ago; 1.81 meters to the right, 2.51 meters below, and 69.18 meters ahead 110 milliseconds ago; 1.35 meters to the right, 2.37 meters below, and 69.04 meters ahead 55 milliseconds ago; and 1.35 meters to the right, 2.26 meters below, and 69.04 meters ahead now.
+    EXAMPLES:
+      - relative position at t-0 ms: [-3.94, -0.48, 61.56]. No prior frames available.
+      This means the object is 3.94 meters to the left, 0.48 meters below, and 61.56 meters ahead of the ego vehicle in the current frame, with no previous data.
+
+  obj: |
+    EXAMPLES:
+
+    Correct Example 1:
+    Template:
+      What is <obj> doing?
+
+    Object:
+      car_2, middle point [1276.5, 924.9]
+
+    Correct Output:
+      What is <car_2, CAM_FRONT, 1276.5, 924.9> doing?
+
+    Correct Example 2:
+    Template:
+      Are <obj> and <obj> close to each other?
+
+    Objects:
+      pedestrian_0, middle [511.8, 981.5]
+      car_3, middle [1085.0, 929.0]
+
+    Correct Output:
+      Are <pedestrian_0, CAM_FRONT, 511.8, 981.5> and <car_3, CAM_FRONT, 1085.0, 929.0> close to each other?
+    WRONG EXAMPLES — NEVER DO THESE
+      "car_4"
+      "<car_4>"
+      "<car_4,1031.5,938.5>"
+      "<car_4 CAM_FRONT 1031 938>"
+      Leaving <obj> unchanged
+      Using the same object twice for different <obj> tokens
+      Removing CAM_FRONT
+      Removing parentheses or commas
+
+    If you output a question like:
+        "What actions could cause a collision with car_4?"
+    YOU HAVE FAILED THE FORMAT.
+
+  position: |
+    EXAMPLES:
+    Template:
+        Is the pedestrian on the <position>?
+
+    Correct Output:
+        Is the pedestrian on the "left side of the ego vehicle"?
+
+    Template:
+        Is the car approaching from the <position>?
+
+    Correct Output:
+        Is the car approaching from the "ahead of the ego vehicle"?
+
+    WRONG EXAMPLES — NEVER DO THESE:
+        <position>
+        left/right/ahead
+        left/right of car
+        Any phrase not exactly matching the three allowed phrases
+
+misc:
+  qa_generation_old_format: |
     Instructions:
 
     1. **Question Template**:
@@ -117,168 +263,6 @@ prompts:
     traffic_light_0 with bbox [x1, y1, width, height], middle point [x, y]
     traffic_sign_0 with bbox [x1, y1, width, height], middle point [x, y]
 
-  position: |
-    Whenever the question template contains <position>, replace it with **exactly one** of the following phrases:
-
-        - "left side of the ego vehicle"
-        - "right side of the ego vehicle"
-        - "ahead of the ego vehicle"
-
-    - Use the phrase that correctly describes the position of the referenced object relative to the ego vehicle.
-
-  position_fewshot: |
-    EXAMPLES:
-    Template:
-        Is the pedestrian on the <position>?
-
-    Correct Output:
-        Is the pedestrian on the "left side of the ego vehicle"?
-
-    Template:
-        Is the car approaching from the <position>?
-
-    Correct Output:
-        Is the car approaching from the "ahead of the ego vehicle"?
-
-    WRONG EXAMPLES — NEVER DO THESE:
-        <position>
-        left/right/ahead
-        left/right of car
-        Any phrase not exactly matching the three allowed phrases
-
-  important_objects: |
-    Do not include all objects in your answer. Focus only on the most important objects that influence the driving decision of the ego vehicle.
-
-  obj: |
-    FOLLOW ALL FORMATTING RULES EXACTLY. DO NOT IGNORE THEM.
-
-    **CRITICAL RULE — REPLACE <obj> TOKENS EXACTLY**
-
-    Every time the question template contains <obj>, replace it with:
-      <object_id, CAM_FRONT, cx, cy>
-
-    Where:
-    - object_id = EXACT provided object name (example: car_4)
-    - CAM_FRONT = literally this exact string
-    - cx, cy = the object's middle point coordinates
-    - must use angle brackets exactly like this: < ... >
-    - NEVER change the order or spacing
-    - Each <obj> must use a DIFFERENT object
-
-    **OBJECT SELECTION RULES**
-    - Use ONLY objects from the provided list.
-    - NEVER reuse the same object for multiple <obj> tokens.
-    - Prefer closer objects and vehicles.
-    - Choose objects that make sense for the question.
-
-    Apart from replacing <obj>, do NOT modify the question template in any way.
-
-  obj_fewshot: |
-    EXAMPLES:
-
-    Correct Example 1:
-    Template:
-      What is <obj> doing?
-
-    Object:
-      car_2, middle point [1276.5, 924.9]
-
-    Correct Output:
-      What is <car_2, CAM_FRONT, 1276.5, 924.9> doing?
-
-    Correct Example 2:
-    Template:
-      Are <obj> and <obj> close to each other?
-
-    Objects:
-      pedestrian_0, middle [511.8, 981.5]
-      car_3, middle [1085.0, 929.0]
-
-    Correct Output:
-      Are <pedestrian_0, CAM_FRONT, 511.8, 981.5> and <car_3, CAM_FRONT, 1085.0, 929.0> close to each other?
-    WRONG EXAMPLES — NEVER DO THESE
-      "car_4"
-      "<car_4>"
-      "<car_4,1031.5,938.5>"
-      "<car_4 CAM_FRONT 1031 938>"
-      Leaving <obj> unchanged
-      Using the same object twice for different <obj> tokens
-      Removing CAM_FRONT
-      Removing parentheses or commas
-
-    If you output a question like:
-        "What actions could cause a collision with car_4?"
-    YOU HAVE FAILED THE FORMAT.
-
-  no_obj: |
-    Use the question exactly as provided without any modifications.  
-
-  qa_generation_QWEN: |
-    **ANSWER RULES**
-    Your answer MUST be supported by the object list
-
-    Do NOT use internal IDs in the answer.
-    Use descriptive phrases instead
-
-    **COORDINATES AND SPATIAL INTERPRETATION**
-    (0,0) = top-left
-    x increases -> right  
-    y increases -> down  
-
-    smaller cy = farther away  
-    larger cy = closer to ego vehicle  
-
-    Bounding box format:
-      [x, y, width, height]
-
-    Output EXACTLY this JSON structure:
-
-    {
-        "question": "...",
-        "reasoning": "...",
-        "short_answer": "..."
-    }
-
-    The question MUST contain correctly formatted object tags.
-    The reasoning MUST include spatial analysis.
-    The short_answer MUST be brief (yes/no or 1-2 sentences).
-
-  valeo_dataset_car_in_view: |
-    Ego vehicle:
-      - bounding box [0, 1620, 1600, 428], midpoint [800, 1834]
-      - always at bottom middle-left, partially visible, moving forward along the y axis
-
-  valeo_tracks_coords_m: |
-    You are also provided consecutive 3D relative position measurements in meters, measured from the ego vehicle sensor from previous frames.
-    Each position is formatted as [x, y, z] with the following coordinate system:
-    - x < 0 left of ego vehicle, x > 0 right of ego vehicle
-    - y < 0 below sensor, y > 0 above sensor (sensor is mounted on the roof of the car about 1.5 meters high)
-    - z > 0 forward distance only (measured parallel to the ground from the sensor)
-
-  nuscenes_tracks_coords_m: |
-    You are also provided consecutive 3D relative position measurements in meters, measured from the ego vehicle sensor from previous frames.
-    Each position is formatted as [x, y, z, distance] with the following coordinate system:
-    - x < 0 left of ego vehicle, x > 0 right of ego vehicle
-    - y < 0 below sensor, y > 0 above sensor (sensor is mounted on the roof of the car about 1.5 meters high)
-    - z > 0 forward distance only (measured parallel to the ground from the sensor)
-
-  tracks_m: |
-    The positions are time-ordered from oldest to newest with 55 milliseconds between frames.
-
-    Special Case: New Objects
-    If an object is detected for the first time in the current frame (t=0 ms), it will have no historical measurements. Its entry will use this exact format:
-    - relative position at t-0 ms: [x, y, z]. No prior frames available.
-
-    Prioritize objects with history for motion-based questions unless the query specifically references new objects.
-
-  tracks_fewshot: |
-    EXAMPLES:
-      - A position of [-1.5, 0.0, 10.0] means the object was 1.5 meters to the left of the ego vehicle and 10.0 meters ahead.
-      - [1.83, -2.48, 69.18] at t-165 ms, [1.81, -2.51, 69.18] at t-110 ms, [1.35, -2.37, 69.04] at t-55 ms, [1.35, -2.26, 69.04] at t-0 ms. means the object was 1.83 meters to the right, 2.48 meters below, and 69.18 meters ahead 165 milliseconds ago; 1.81 meters to the right, 2.51 meters below, and 69.18 meters ahead 110 milliseconds ago; 1.35 meters to the right, 2.37 meters below, and 69.04 meters ahead 55 milliseconds ago; and 1.35 meters to the right, 2.26 meters below, and 69.04 meters ahead now.
-    EXAMPLES:
-      - relative position at t-0 ms: [-3.94, -0.48, 61.56]. No prior frames available.
-      This means the object is 3.94 meters to the left, 0.48 meters below, and 61.56 meters ahead of the ego vehicle in the current frame, with no previous data.
-
   tracks_px: |
     You are also provided consecutive middle point positions from previous frames.
     Each position is formatted the same as the other mid points.
@@ -299,28 +283,36 @@ prompts:
     - Never calculate velocity/direction for these objects (insufficient data).
     - Prioritize objects with history for motion-based questions unless the query specifically references new objects.
 
-# Stolen from https://github.com/meta-llama/synthetic-data-kit/blob/main/configs/config.yaml
-qa_rating: |
-  Rate each question-answer pair on a scale from 1-10, based on:
-    - Accuracy (0-3): factual correctness
-    - Relevance (0-2): relevance to content
-    - Clarity (0-2): clear language
-    - Usefulness (0-3): value for model learning
+  # Stolen from https://github.com/meta-llama/synthetic-data-kit/blob/main/configs/config.yaml
+  qa_rating: |
+    Rate each question-answer pair on a scale from 1-10, based on:
+      - Accuracy (0-3): factual correctness
+      - Relevance (0-2): relevance to content
+      - Clarity (0-2): clear language
+      - Usefulness (0-3): value for model learning
 
-    YOU MUST RETURN A VALID JSON OBJECT WITH THIS EXACT SCHEMA:
-    {{
-      "question": "Exact question text",
-      "answer": "Exact answer text",
-      "rating": 8
-    }}
+      YOU MUST RETURN A VALID JSON OBJECT WITH THIS EXACT SCHEMA:
+      {{
+        "question": "Exact question text",
+        "answer": "Exact answer text",
+        "rating": 8
+      }}
 
-    OR FOR MULTIPLE PAIRS:
-    [
-      {{"question": "Q1", "answer": "A1", "rating": 8}},
-      {{"question": "Q2", "answer": "A2", "rating": 9}}
-    ]
+      OR FOR MULTIPLE PAIRS:
+      [
+        {{"question": "Q1", "answer": "A1", "rating": 8}},
+        {{"question": "Q2", "answer": "A2", "rating": 9}}
+      ]
 
-    *** YOUR RESPONSE MUST BE VALID JSON AND NOTHING ELSE - NO EXPLANATION, NO MARKDOWN ***
+      *** YOUR RESPONSE MUST BE VALID JSON AND NOTHING ELSE - NO EXPLANATION, NO MARKDOWN ***
 
-    QA pairs to rate:
-    {pairs}
+      QA pairs to rate:
+      {pairs}
+
+  # Used the prompt I found in this repo. Will need a review if we want to use it
+  describe: |
+    Describe the automotive scene using the provided information. Identify each object and its position within the image.
+    Mention the spatial relationships between objects. Avoid specific technical details like pixels, coordinates, or units.
+    Focus on detailing the number of objects detected. Avoid mentioning specific categories, object IDs, or irrelevant details such as traffic light color,
+    traffic sign types or car types. Ensure your description is concise, detailed, and strictly based on the available data.
+    Do not include assumptions or additional information beyond what is provided. Begin directly with describing the objects locations in the scene and their spatial relationships.

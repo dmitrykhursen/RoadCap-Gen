@@ -1,6 +1,5 @@
 import argparse
 import json
-import math
 import os
 import random
 import sys
@@ -107,7 +106,7 @@ def preprocess_scene_tracks(raw_tracks: Dict[str, Any], dataset_name: str) -> tu
 
         for d in track_obj["track"]:
             frame_num = d["frame"]
-            camera = d.get("camera", "")
+            camera = d["camera"]
 
             # 1. Map the timestamp to the frame number globally (ONLY for nuScenes)
             if dataset_name == "nuscenes":
@@ -118,7 +117,7 @@ def preprocess_scene_tracks(raw_tracks: Dict[str, Any], dataset_name: str) -> tu
             if frame_num not in filtered_tracks_dict:
                 filtered_tracks_dict[frame_num] = d
             else:
-                existing_camera = filtered_tracks_dict[frame_num].get("camera", "")
+                existing_camera = filtered_tracks_dict[frame_num]["camera"]
                 if camera in preferred_cameras and existing_camera not in preferred_cameras:
                     filtered_tracks_dict[frame_num] = d
 
@@ -142,7 +141,7 @@ def detections_to_text(
     track_type: str = "m",
     include_tracks: bool = False,
     dataset_name: str = "valeo",
-) -> str:
+) -> List[Dict[str, Any]]:
     if frame is None:
         raise ValueError("Frame must be provided to extract frame number.")
 
@@ -162,34 +161,42 @@ def detections_to_text(
     else:
         raise ValueError(f"Unsupported dataset_name: {dataset_name}")
 
-    lines = [f"\n--- Objects detected from {camera_name} ---"]
-
+    objects_list = []
     for category, cat_objs in data["categories"].items():
-        for idx, cat_obj in enumerate(cat_objs["objects"]):
-            line = f"- {camera_name}_{category}_{idx}:\n\t - current bbox: {cat_obj['bbox']}\n\t - current middle point: {cat_obj['mid_point']}."
+        for idx, obj in enumerate(cat_objs["objects"]):
+            obj_dict = {
+                "id": f"{camera_name}_{category}_{idx}",
+                "bbox": obj["bbox"],
+                "center": obj["mid_point"],
+            }
 
             if include_tracks and tracks_by_object_id:
-                tracks = tracks_by_object_id.get(cat_obj["id"])
+                tracks = tracks_by_object_id[obj["id"]]
 
                 if tracks:
-                    track_list = tracks["track"]
-                    frames = tracks["frame_ints"]
+                    window, missing = get_past(
+                        tracks["track"],
+                        tracks["frame_ints"],
+                        frame_idx,
+                        frames_back,
+                    )
 
-                    window, missing = get_past(track_list, frames, frame_idx, frames_back)
+                    if window:
+                        if frame_idx in missing:
+                            time_range = range(len(window), 0, -1)
+                        else:
+                            time_range = range(len(window) - 1, -1, -1)
 
-                    if len(window) > 0:
-                        r = range(len(window), 0, -1) if frame_idx in missing else range(len(window) - 1, -1, -1)
                         if track_type == "m":
                             if dataset_name == "nuscenes":
-                                pos = [f"[{d['x']}, {d['y']}, {d['z']}, {d['depth']}] at t-{t * 55} ms" for t, d in zip(r, window)]
+                                obj_dict["pos_history"] = [[d["x_ego"], d["y_ego"], d["z_ego"], d["depth"]] for _, d in zip(time_range, window)]
                             else:
-                                pos = [f"[{d['x']}, {d['y']}, {d['z']}] at t-{t * 55} ms" for t, d in zip(r, window)]
-                            line += f"\n\t - relative positions: {', '.join(pos)}."
+                                obj_dict["pos_history"] = [[d["x"], d["y"], d["z"]] for _, d in zip(time_range, window)]
                         else:
-                            mid = [f"{d['center_2d_px']} at t-{t * 55} ms" for t, d in zip(r, window)]
-                            line += f"\n\t - midpoints: {', '.join(mid)}."
-            lines.append(line)
-    return "\n".join(lines)
+                            obj_dict["pos_history"] = [d["center_2d_px"] for _, d in zip(time_range, window)]
+
+            objects_list.append(obj_dict)
+    return objects_list
 
 
 def generate_prompt(
@@ -200,23 +207,32 @@ def generate_prompt(
     directions: List[str],
     tracks: bool = False,
     track_type: str = "m",
+    dataset_name: str = "nuscenes",
 ) -> str:
     parts = [
         config_prompts["context"],
         config_prompts["obj"] if "<obj>" in q else config_prompts["no_obj"],
-        config_prompts["qa_generation_QWEN"],
+        config_prompts["answer_rules"],
+        config_prompts["coordinate_system"],
     ]
     if tracks:
-        parts.append(f"\n{config_prompts['tracks_' + track_type]}")
+        parts.append(f"\n{config_prompts[dataset_name + '_tracks_coords_' + track_type]}")
+    parts.append(f"\n{config_prompts['detected_objects' + '_tracks' if tracks else '']}")
 
     parts.append(objects)
 
+    if dataset_name == "valeo":
+        parts.append(f"{config_prompts['valeo_dataset_car_in_view']}")
+
     if "<position>" in q:
         parts.append(f"\n{config_prompts['position']}")
+
     if any(x in q for x in ["important objects", "priority"]):
         parts.append(f"\n{config_prompts['important_objects']}")
+
     if description:
         parts.append(f"\nThe scene description is:\n {description}")
+
     if "following options:" in q:
         q += " " + " ".join(get_prefixed_permutation(directions))
 
@@ -461,8 +477,6 @@ def main():
             # ---- Load Multi-Camera Files & Merge Data ----
             cam_json_files = {}
             cam_files_lens = []
-            cam_merged_data = {}
-
             for cam in cameras:
                 cam_dir = Path(args.yolo_path) / cam / scene_name
                 jsons = sorted([f for f in cam_dir.glob("*.json") if "merged" not in f.name])
@@ -502,7 +516,9 @@ def main():
             tracks_by_id = None
             timestamp_to_frame = {}
             if args.use_tracks and args.tracks_path:
-                track_path = Path(args.tracks_path) / Path(scene_name).stem / "tracks.json"
+                track_path = (
+                    Path(args.tracks_path) / Path(scene_name).stem / ("tracks" + "_ego_centric" if args.dataset_name == "nuscenes" else "" + ".json")
+                )
                 with open(track_path, "r", encoding="utf-8") as f:
                     raw_tracks = json.load(f)
 
@@ -517,7 +533,9 @@ def main():
                 if frame_master_id in processed_frames:
                     continue
 
-                combined_scene_text = ["Here is the list of objects detected in the scene from all cameras. Use them to generate the QA pairs:"]
+                prefix = "Here is the list of objects detected in the scene from all cameras. Use them to generate the QA pairs:"
+                combined_scene_text = []
+
                 for cam in cameras:
                     cam_dir = Path(args.yolo_path) / cam / scene_name
                     processed_json = cam_dir / "merged_processed.json"
@@ -531,8 +549,7 @@ def main():
                             data = json.load(f)
 
                     frame_stem = cam_json_files[cam][frame_idx].stem
-                    cam_data = cam_merged_data[cam][frame_stem + ".jpg"]
-
+                    cam_data = data[frame_stem + ".jpg"]
                     cam_text = detections_to_text(
                         data=cam_data,
                         camera_name=cam,
@@ -544,10 +561,11 @@ def main():
                         include_tracks=args.use_tracks,
                         dataset_name=args.dataset_name,
                     )
-                    if cam_text.strip():
-                        combined_scene_text.append(cam_text)
-
-                final_scene_text = "\n".join(combined_scene_text)
+                    if cam_text:
+                        combined_scene_text.extend(cam_text)
+                object_lines = [json.dumps(obj, separators=(",", ":")) for obj in combined_scene_text]
+                json_data = "[\n" + ",\n".join(object_lines) + "\n]"
+                final_scene_text = prefix + "\n" + json_data
 
                 # Create a deterministic seed based on the scene
                 rng = random.Random(f"{scene_name}_{frame_idx}")
@@ -581,6 +599,7 @@ def main():
         except Exception as e:
             print(f"❌ Error in [{scene_idx + 1}/{total_scenes}] {scene_name}: {e}")
             traceback.print_exc()
+            exit()
     print("Job complete.")
 
 
