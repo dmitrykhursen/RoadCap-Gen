@@ -4,7 +4,7 @@ prompts:
     Your task is to generate exactly ONE Question/Answer (QA) pair based on a provided question template and a specified objects.
 
     ### SCENE CONTEXT
-    - Image Size: 2448 x 2048 (width x height)
+    - Image Size: 2448 x 2048 (width x height) px
 
   position: |
     Whenever the question template contains <position>, replace it with **exactly one** of the following phrases, that describes the position of the referenced object relative to the ego vehicle:
@@ -44,7 +44,7 @@ prompts:
 
   coordinate_system: |
     ### COORDINATE SYSTEM & SPATIAL RULES
-    2D Camera Coordinates:
+    2D Camera Coordinates in px:
       - (0,0) = top-left
       - x increases -> right 
       - y increases -> down 
@@ -55,7 +55,7 @@ prompts:
     ### ANSWER RULES
     - Grounding: Your answer MUST be supported by the provided object list.
     - Prioritization: Focus on vehicles and objects closer to the ego vehicle.
-    - Formatting: Do NOT use internal IDs (e.g., "car_0") in the answer. Use descriptive phrases instead (e.g., "the car on the left").
+    - Formatting: Do NOT use internal IDs (e.g., "car_0") in the answer outside of tags. Use descriptive phrases instead (e.g., "the car on the left").
     - Output Format: You must output EXACTLY the following JSON structure and nothing else.
     {
         "question": "...", // MUST contain correctly formatted object tags
@@ -67,17 +67,17 @@ prompts:
     ### DETECTED OBJECTS DATA
     Use the exact question template provided without modifications.
     Data Schema: 
-    {"id":"Camera_ObjectType","bbox":[x, y, width, height],"center":[cx, cy],"pos_history":[[x,y,z,d at t-2],[x,y,z,d at t-1],[x,y,z,d at t-0]]}
+    {"id":"Camera_ObjectType","bbox":[x, y, width, height in px],"center":[cx, cy in px],"pos_history":[[x,y,z,d at t-2],[x,y,z,d at t-1],[x,y,z,d at t-0] in meters]}
     *Note: If an object is new at t=0, pos_history will only contain one array: [x,y,z,d at t-0].*
 
   detected_objects: |
     ### DETECTED OBJECTS DATA
     Use the exact question template provided without modifications.
     Data Schema: 
-    {"id":"Camera_ObjectType","bbox":[cx, cy, width, height],"center":[cx, cy]}
+    {"id":"Camera_ObjectType","bbox":[cx, cy, width, height in px],"center":[cx, cy in px]}
 
   valeo_tracks_coords_m: |
-    3D Ego Vehicle Coordinates [x, y, z] in meters:
+    3D Ego Vehicle Coordinates [x, y, z in meters]:
     - x < 0 left of ego vehicle, x > 0 right of ego vehicle
     - y < 0 below sensor, y > 0 above sensor (sensor is mounted on the roof of the car about 1.5 meters high)
     - z > 0 forward distance only (measured parallel to the ground from the sensor)
@@ -106,26 +106,12 @@ fewshot:
       This means the object is 3.94 meters to the left, 0.48 meters below, and 61.56 meters ahead of the ego vehicle in the current frame, with no previous data.
 
   obj: |
-    EXAMPLES:
-
-    Correct Example 1:
-    Template:
-      What is <obj> doing?
-
-    Object:
-      car_2, middle point [1276.5, 924.9]
-
-    Correct Output:
-      What is <car_2, CAM_FRONT, 1276.5, 924.9> doing?
-
-    Correct Example 2:
-    Template:
+    Correct Example:
+    Template:;
       Are <obj> and <obj> close to each other?
-
     Objects:
       pedestrian_0, middle [511.8, 981.5]
       car_3, middle [1085.0, 929.0]
-
     Correct Output:
       Are <pedestrian_0, CAM_FRONT, 511.8, 981.5> and <car_3, CAM_FRONT, 1085.0, 929.0> close to each other?
     WRONG EXAMPLES — NEVER DO THESE
@@ -137,7 +123,6 @@ fewshot:
       Using the same object twice for different <obj> tokens
       Removing CAM_FRONT
       Removing parentheses or commas
-
     If you output a question like:
         "What actions could cause a collision with car_4?"
     YOU HAVE FAILED THE FORMAT.

@@ -1,12 +1,13 @@
 import argparse
 import json
+import math
 import os
 import random
 import sys
 import traceback
 from bisect import bisect_left
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import regex as re
 import torch
@@ -137,13 +138,18 @@ def detections_to_text(
     tracks_by_object_id: Optional[Dict[str, Any]] = None,
     timestamp_to_frame: Optional[Dict[str, int]] = None,
     frame: Optional[str] = None,
-    frames_back: int = 3,
+    frames_back: int = 2,
     track_type: str = "m",
     include_tracks: bool = False,
     dataset_name: str = "valeo",
-) -> List[Dict[str, Any]]:
+    global_coords: bool = False,
+) -> Tuple[List[Dict[str, Any]], Optional[List[float]]]:
     if frame is None:
         raise ValueError("Frame must be provided to extract frame number.")
+
+    if data.get("categories", None) is None:
+        print(f"No categories found in {frame} for {camera_name}. Skipping.")
+        return [], None
 
     # --- Dataset-Specific Frame Extraction ---
     if dataset_name == "valeo":
@@ -162,6 +168,7 @@ def detections_to_text(
         raise ValueError(f"Unsupported dataset_name: {dataset_name}")
 
     objects_list = []
+    ego_pos = None
     for category, cat_objs in data["categories"].items():
         for idx, obj in enumerate(cat_objs["objects"]):
             obj_dict = {
@@ -174,6 +181,9 @@ def detections_to_text(
                 tracks = tracks_by_object_id[obj["id"]]
 
                 if tracks:
+                    if global_coords and dataset_name == "nuscenes":
+                        ego_pos = tracks["track"]["ego_translation"]
+
                     window, missing = get_past(
                         tracks["track"],
                         tracks["frame_ints"],
@@ -189,14 +199,26 @@ def detections_to_text(
 
                         if track_type == "m":
                             if dataset_name == "nuscenes":
-                                obj_dict["pos_history"] = [[d["x_ego"], d["y_ego"], d["z_ego"], d["depth"]] for _, d in zip(time_range, window)]
+                                coords = ["x", "y", "z"] if global_coords else ["x_ego", "y_ego", "z_ego"]
+                                fields = coords + ["depth"]
                             else:
-                                obj_dict["pos_history"] = [[d["x"], d["y"], d["z"]] for _, d in zip(time_range, window)]
+                                fields = ["x", "y", "z"]
+
+                            def get_value_m(d):
+                                return [d[field] for field in fields]
+
+                            get_value = get_value_m
                         else:
-                            obj_dict["pos_history"] = [d["center_2d_px"] for _, d in zip(time_range, window)]
+
+                            def get_value_px(d):
+                                return d["center_2d_px"]
+
+                            get_value = get_value_px
+
+                        obj_dict["pos_history"] = [get_value(d_item) for _, d_item in zip(time_range, window)]
 
             objects_list.append(obj_dict)
-    return objects_list
+    return objects_list, ego_pos
 
 
 def generate_prompt(
@@ -204,6 +226,7 @@ def generate_prompt(
     description: Optional[str],
     objects: str,
     config_prompts: Dict[str, str],
+    config_prompts_fewshot: Dict[str, str],
     directions: List[str],
     tracks: bool = False,
     track_type: str = "m",
@@ -211,13 +234,21 @@ def generate_prompt(
 ) -> str:
     parts = [
         config_prompts["context"],
-        config_prompts["obj"] if "<obj>" in q else config_prompts["no_obj"],
         config_prompts["answer_rules"],
-        config_prompts["coordinate_system"],
     ]
+
+    if "<obj>" in q:
+        parts.append(config_prompts["obj"])
+        parts.append(config_prompts_fewshot["obj"])
+    else:
+        parts.append(config_prompts["no_obj"])
+
+    parts.append(config_prompts["coordinate_system"])
+
     if tracks:
         parts.append(f"\n{config_prompts[dataset_name + '_tracks_coords_' + track_type]}")
-    parts.append(f"\n{config_prompts['detected_objects' + '_tracks' if tracks else '']}")
+
+    parts.append(f"\n{config_prompts['detected_objects' + ('_tracks' if tracks else '')]}")
 
     parts.append(objects)
 
@@ -237,7 +268,7 @@ def generate_prompt(
         q += " " + " ".join(get_prefixed_permutation(directions))
 
     parts.append(f"\nThe question to use is:\n {q}\n")
-    return "\n".join(parts)
+    return "".join(parts)
 
 
 # =============================================
@@ -332,12 +363,12 @@ class ModelRespondervllm:
 
         self.llm = LLM(
             model=model_name,
-            # dtype="bfloat16", # local problem
+            dtype="bfloat16",  # local problem
             gpu_memory_utilization=0.95,
             enable_chunked_prefill=True,
             max_model_len=32768,
             enable_prefix_caching=True,
-            attention_backend="TRITON_ATTN",  # local problem
+            # attention_backend="TRITON_ATTN",  # local problem
         )
         self.tokenizer = self.llm.get_tokenizer()
 
@@ -346,7 +377,7 @@ class ModelRespondervllm:
             temperature=0.6 if thinking else 0.7,
             top_p=0.95 if thinking else 0.8,
             top_k=20,
-            max_tokens=32768 // 4,
+            max_tokens=32768,
         )
 
     def generate(self, messages: List[Dict[str, str]]):
@@ -358,17 +389,15 @@ class ModelRespondervllm:
             chat_template_kwargs={"enable_thinking": self.thinking},
         )
 
-        results = []
-        for out in outputs:
-            text = out.outputs[0].text
-            if "</think>" in text:
-                think, answer = text.split("</think>", 1)
-                think = think.replace("<think>", "").strip()
-            else:
-                think, answer = "", text.strip()
-            results.append((think, answer.strip()))
+        text = outputs[0].outputs[0].text
 
-        return results
+        if "</think>" in text:
+            think, answer = text.split("</think>", 1)
+            think = think.replace("<think>", "").strip()
+        else:
+            think, answer = "", text.strip()
+
+        return think, answer.strip()
 
     def generate_batch(self, batch_messages: List[List[Dict[str, str]]], chunk_size: int = 2):
         """Processes massive batches by chunking them to avoid OOM spikes, preserving original order."""
@@ -421,12 +450,10 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="Qwen/Qwen3-14B")
     parser.add_argument("--thinking", action="store_true")
-    parser.add_argument("--start_idx", type=int, default=0)
-    parser.add_argument("--end_idx", default=None)
     parser.add_argument("--use_tracks", action="store_true")
     parser.add_argument("--track_type", choices=["m", "px"], default="m")
     parser.add_argument("--yolo_path", type=str, required=True, help="Path to annotations/metadata")
-    parser.add_argument("--output_folder", type=str, default="data/test")
+    parser.add_argument("--output_folder", type=str, default="data/nuscenes_tracks")
     parser.add_argument("--qas_ratios", type=str, required=True)
     parser.add_argument("--prompts_config", type=str, required=True)
     parser.add_argument("--dataset_name", type=str, default="nuscenes")
@@ -434,9 +461,16 @@ def parse_args():
     parser.add_argument("--frames_back", type=int, default=2)  # 2 back and the current so 3
     parser.add_argument("--tracks_path", type=str, default=None)
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing results")
+    parser.add_argument("--scene_prefix", type=str, default=None, help="Filter scenes by prefix (e.g., 'n008' or 'n015')")
+    parser.add_argument(
+        "--global_coords",
+        action="store_true",
+        help="When using the nuScenes dataset with tracks, use global coordinates instead of ego-centric ones.",
+    )
 
-    parser.add_argument("--scene_idx_start", type=int, default=None)
-    parser.add_argument("--scene_idx_end", type=int, default=None)
+    # --- Chunking Arguments for SLURM Arrays ---
+    parser.add_argument("--chunk_id", type=int, default=0, help="Which chunk this worker processes (0-indexed)")
+    parser.add_argument("--num_chunks", type=int, default=1, help="Total number of workers/chunks")
     return parser.parse_args()
 
 
@@ -452,18 +486,24 @@ def main():
 
     q_ratios = get_test_distribution(ratio_data)
     config_prompts = config["prompts"]
+    config_prompts_fewshot = config["fewshot"]
     directions = ["Turn right.", "Drive backward.", "Going ahead.", "Turn left."]
 
     cameras, all_scenes = get_cameras_and_scenes(args.yolo_path)
+    if args.scene_prefix:
+        all_scenes = [s for s in all_scenes if s.startswith(args.scene_prefix)]
+        print(f"Filtering scenes with prefix: '{args.scene_prefix}'")
+
     total_scenes = len(all_scenes)
+    chunk_size = math.ceil(total_scenes / args.num_chunks)
+    start_idx = args.chunk_id * chunk_size
+    end_idx = min(start_idx + chunk_size, total_scenes)
+
     print(f"Found {len(cameras)} cameras and {total_scenes} total scenes.")
     all_scenes = sorted(all_scenes)
-    if args.scene_idx_start is not None and args.scene_idx_end is not None:
-        if args.scene_idx_end > total_scenes:
-            print(f"scene_idx_end {args.scene_idx_end} is greater than total scenes {total_scenes}. Adjusting to {total_scenes}.")
-            args.scene_idx_end = total_scenes
-        all_scenes = all_scenes[args.scene_idx_start : args.scene_idx_end]
-        print(f"Filtering scenes to index range: [{args.scene_idx_start}, {args.scene_idx_end})")
+    all_scenes = all_scenes[start_idx:end_idx]
+    print(f"Filtering scenes to index range: [{start_idx}, {end_idx})")
+    total_scenes = len(all_scenes)
 
     responder = ModelRespondervllm(args.model, thinking=args.thinking)
 
@@ -517,7 +557,9 @@ def main():
             timestamp_to_frame = {}
             if args.use_tracks and args.tracks_path:
                 track_path = (
-                    Path(args.tracks_path) / Path(scene_name).stem / ("tracks" + "_ego_centric" if args.dataset_name == "nuscenes" else "" + ".json")
+                    Path(args.tracks_path)
+                    / Path(scene_name).stem
+                    / ("tracks" + ("_ego_centric" if (not args.global_coords and args.dataset_name == "nuscenes") else "") + ".json")
                 )
                 with open(track_path, "r", encoding="utf-8") as f:
                     raw_tracks = json.load(f)
@@ -549,8 +591,8 @@ def main():
                             data = json.load(f)
 
                     frame_stem = cam_json_files[cam][frame_idx].stem
-                    cam_data = data[frame_stem + ".jpg"]
-                    cam_text = detections_to_text(
+                    cam_data = data.get(frame_stem + ".jpg", {})
+                    cam_text, ego_pos = detections_to_text(
                         data=cam_data,
                         camera_name=cam,
                         tracks_by_object_id=tracks_by_id,
@@ -565,6 +607,8 @@ def main():
                         combined_scene_text.extend(cam_text)
                 object_lines = [json.dumps(obj, separators=(",", ":")) for obj in combined_scene_text]
                 json_data = "[\n" + ",\n".join(object_lines) + "\n]"
+                if ego_pos is not None:
+                    prefix += f"\nThe ego vehicle's position (x, y, z) is approximately: {ego_pos}"
                 final_scene_text = prefix + "\n" + json_data
 
                 # Create a deterministic seed based on the scene
@@ -578,7 +622,9 @@ def main():
                 used_objs = set()
                 with torch.inference_mode():
                     for i, q in enumerate(questions):
-                        prompt = generate_prompt(q, None, final_scene_text, config_prompts, directions, args.use_tracks, args.track_type)
+                        prompt = generate_prompt(
+                            q, None, final_scene_text, config_prompts, config_prompts_fewshot, directions, args.use_tracks, args.track_type
+                        )
                         if used_objs and "<obj>" in q:
                             prompt += f"\nAvoid reusing: {', '.join(sorted(used_objs))}"
 
@@ -591,15 +637,13 @@ def main():
                             scene_results.update(parsed)
                             used_objs.update(re.findall(pattern, content))
                         except json.JSONDecodeError as e:
-                            print(f"[Warning] JSON decode error for {scene_name} frame {frame_idx} question {i}: {e}")
-                            continue
+                            print(f"[Warning] JSON decode error for {scene_name} frame {frame_idx} question {i}: {e}\n{content}")
 
                 append_json_line(str(output_file), {frame_master_id: scene_results})
 
         except Exception as e:
             print(f"❌ Error in [{scene_idx + 1}/{total_scenes}] {scene_name}: {e}")
             traceback.print_exc()
-            exit()
     print("Job complete.")
 
 

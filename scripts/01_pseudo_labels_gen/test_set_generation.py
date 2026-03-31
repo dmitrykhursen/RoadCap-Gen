@@ -38,9 +38,7 @@ def get_past(tracks, frames, current_frame, frames_back):
     return window, missing
 
 
-def detections_to_text(
-    data, cam_name, frame_idx, tracks_by_object_id=None, frames_back=3, track_type="m", include_tracks=False
-):
+def detections_to_text(data, cam_name, frame_idx, tracks_by_object_id=None, frames_back=3, track_type="m", include_tracks=False):
     lines = [f"\n--- Camera: {cam_name} ---"]
     if "categories" not in data:
         return ""
@@ -207,13 +205,9 @@ def parse_args():
     parser.add_argument("--scene_idx_start", type=int, default=None)
     parser.add_argument("--scene_idx_end", type=int, default=None)
 
-    parser.add_argument(
-        "--yolo_path", type=str, required=True, help="Path to /annotations_in_valeo_format containing the 6 camera folders"
-    )
+    parser.add_argument("--yolo_path", type=str, required=True, help="Path to /annotations_in_valeo_format containing the 6 camera folders")
     parser.add_argument("--output_folder", type=str, default="data/output")
-    parser.add_argument(
-        "--qas_counts_dir", type=str, required=True, help="Path to folder with pre-calculated JSON counts per scene"
-    )
+    parser.add_argument("--qas_counts_dir", type=str, required=True, help="Path to folder with pre-calculated JSON counts per scene")
     parser.add_argument("--prompts_config", type=str, required=True)
 
     parser.add_argument("--dataset_name", type=str, default="nuscenes")
@@ -244,9 +238,7 @@ if __name__ == "__main__":
     all_scenes = sorted(all_scenes)
     if args.scene_idx_start is not None and args.scene_idx_end is not None:
         if args.scene_idx_end > total_scenes:
-            print(
-                f"⚠️ scene_idx_end {args.scene_idx_end} is greater than total scenes {total_scenes}. Adjusting to {total_scenes}."
-            )
+            print(f"⚠️ scene_idx_end {args.scene_idx_end} is greater than total scenes {total_scenes}. Adjusting to {total_scenes}.")
             args.scene_idx_end = total_scenes
         all_scenes = all_scenes[args.scene_idx_start : args.scene_idx_end]
         print(f"🔍 Further filtering scenes to index range: [{args.scene_idx_start}, {args.scene_idx_end})")
@@ -298,14 +290,10 @@ if __name__ == "__main__":
                             pass  # Skip corrupted lines
 
                 if len(processed_frames) >= num_frames:
-                    print(
-                        f"⏩ [{iz + 1}/{total_scenes}] Skipping: {scene_name} (Fully processed {len(processed_frames)}/{num_frames} frames)"
-                    )
+                    print(f"⏩ [{iz + 1}/{total_scenes}] Skipping: {scene_name} (Fully processed {len(processed_frames)}/{num_frames} frames)")
                     continue
                 else:
-                    print(
-                        f"🔄 [{iz + 1}/{total_scenes}] Resuming: {scene_name} ({len(processed_frames)}/{num_frames} frames done)"
-                    )
+                    print(f"🔄 [{iz + 1}/{total_scenes}] Resuming: {scene_name} ({len(processed_frames)}/{num_frames} frames done)")
             else:
                 print(f"🚀 [{iz + 1}/{total_scenes}] Processing: {scene_name}")
 
@@ -343,25 +331,19 @@ if __name__ == "__main__":
                 # Skip if we already successfully wrote this frame to the JSONL
                 if frame_master_id in processed_frames:
                     continue
-                combined_scene_text = [
-                    "Here is the list of objects detected in the scene from all cameras. Use them to generate the QA pairs:"
-                ]
+                combined_scene_text = ["Here is the list of objects detected in the scene from all cameras. Use them to generate the QA pairs:"]
                 for cam in cameras:
                     processed_json = Path(args.yolo_path) / cam / scene_name / "merged_processed.json"
                     if not processed_json.exists():
                         # TODO: I dont know how to actually use this, the import crashes cause cant find src
                         from src.utils.qas_generation_helper import run_yolo_processing
 
-                        data = run_yolo_processing(
-                            input_path=scene_name, output_path=scene_name, dataset_name=args.dataset_name
-                        )
+                        data = run_yolo_processing(input_path=scene_name, output_path=scene_name, dataset_name=args.dataset_name)
                     else:
                         data = json.load(open(processed_json))
 
                     cam_data = data.get(cam_json_files[cam][frame_idx].stem + ".jpg", {})
-                    cam_text = detections_to_text(
-                        cam_data, cam, frame_idx, tracks_by_id, args.frames_back, args.track_type, args.use_tracks
-                    )
+                    cam_text = detections_to_text(cam_data, cam, frame_idx, tracks_by_id, args.frames_back, args.track_type, args.use_tracks)
                     if cam_text.strip():
                         combined_scene_text.append(cam_text)
 
@@ -372,9 +354,7 @@ if __name__ == "__main__":
                 used_objs = set()
                 with torch.inference_mode():
                     for i, q in enumerate(questions):
-                        prompt = generate_prompt(
-                            q, None, final_scene_text, config_prompts, directions, args.use_tracks, args.track_type
-                        )
+                        prompt = generate_prompt(q, None, final_scene_text, config_prompts, directions, args.use_tracks, args.track_type)
                         if used_objs and "<obj>" in q:
                             prompt += f"\nAvoid reusing: {', '.join(sorted(used_objs))}"
 
@@ -393,7 +373,6 @@ if __name__ == "__main__":
                 append_json_line(str(output_file), {frame_master_id: scene_results})
         except Exception as e:
             print(f"❌ Error in [{iz + 1}/{total_scenes}] {scene_name}: {e}")
-            print(f"CAM {cam} FRAME {frame_idx}")
             traceback.print_exc()
 
     print("Job complete.")

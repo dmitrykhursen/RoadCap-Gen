@@ -8,7 +8,7 @@ from pyquaternion import Quaternion
 # 1. Initialize nuScenes
 # Make sure dataroot points to the parent folder containing 'v1.0-trainval'
 print("Loading nuScenes database...")
-nusc = NuScenes(version="v1.0-trainval", dataroot="../nuscenes", verbose=False)
+nusc = NuScenes(version="v1.0-trainval", dataroot="/scratch/project/eu-25-10/datasets/nuScenes", verbose=False)
 
 # 2. Build the fast lookup dictionary (basename -> ego_pose_token)
 print("Building filename lookup dictionary...")
@@ -18,7 +18,7 @@ for sd in nusc.sample_data:
     filename_to_pose_token[basename] = sd["ego_pose_token"]
 
 # 3. Define your directories and filenames
-scenes_root_dir = Path("./data/tracks_by_scene/")
+scenes_root_dir = Path("/scratch/project/eu-25-10/datasets/nuScenes_metadata/tracks_by_scene")
 input_filename = "tracks.json"  # Change this if your raw files are named differently
 output_filename = "tracks_ego_centric.json"
 # 4. Loop over all scene folders recursively
@@ -46,7 +46,7 @@ for track_file_path in scenes_root_dir.rglob(input_filename):
             pose_token = filename_to_pose_token[frame_name]
             pose = nusc.get("ego_pose", pose_token)
 
-            ego_translation = np.array(pose["translation"])
+            ego_translation = np.array(pose["translation"]) # also ego position in 3D (global coordinates)
             ego_rotation = Quaternion(pose["rotation"])
 
             # Ensure the global coordinates actually exist in this frame
