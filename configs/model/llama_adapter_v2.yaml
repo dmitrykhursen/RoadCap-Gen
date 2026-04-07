@@ -1,0 +1,6 @@
+type: llama_adapter_v2
+name: llama_adapter_v2_multimodal7b
+llama_dir: "/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/external/DriveLM/challenge/llama_adapter_v2_multimodal7b/ckpts/llama_model_weights" # Folder containing the tokenizer.model and 7B folder
+llama_type: "7B"
+dtype: "bf16"
+max_length: 2048

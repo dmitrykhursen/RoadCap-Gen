@@ -1,0 +1,13 @@
+checkpoint_model: "/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/external/DriveLM/challenge/llama_adapter_v2_multimodal7b/ckpts/1bcbffc43484332672092e0024a8699a6eb5f558161aebf98a7c6b1db67224d1_LORA-BIAS-7B.pth" # The DriveLM tuned weights
+load_mode: "adapter"
+output_dir: "output/inference"
+output_file: "drivelm_pred_for_HF_test_qas.json"
+split: "all_data" 
+add_timestamp: false
+num_workers: 4
+batch_size: 2
+
+generation:
+  max_new_tokens: 256
+  temperature: 0.2
+  top_p: 0.1
