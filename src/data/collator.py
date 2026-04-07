@@ -10,7 +10,6 @@ class RoadCapCollator:
         self.MAX_LENGTH = 8192
 
     def __call__(self, examples: List[Dict[str, Any]]) -> Dict[str, Any]:
-
         images = []
         text_prompts = []
         
@@ -19,6 +18,7 @@ class RoadCapCollator:
         questions = []
         tags = []
         ids = []
+        depth_latents_list = []
 
         # 2. Build prompts + collect images and metadata
         for ex in examples:
@@ -33,6 +33,7 @@ class RoadCapCollator:
             questions.append(ex.get("question", ""))
             tags.append(ex.get("tag", [-1]))
             ids.append(ex.get("id", -1))
+            depth_latents_list.append(ex.get("depth_latents", None))
 
             conversation = [
                 {
@@ -74,5 +75,16 @@ class RoadCapCollator:
         batch["tags"] = tags
         batch["ids"] = ids
 
-        # 6. Convert BatchEncoding to a standard dict 
+        # Stack depth latents: use zeros for samples missing depth embeddings
+        zero_latent = torch.zeros(32, 35, 63, dtype=torch.float32)
+        stacked = torch.stack([
+            d if d is not None else zero_latent
+            for d in depth_latents_list
+        ], dim=0)  # [B, 32, 35, 63]
+        batch["depth_latents"] = stacked
+        batch["depth_latents_mask"] = torch.tensor(
+            [d is not None for d in depth_latents_list], dtype=torch.bool
+        )
+
+        # 6. Convert BatchEncoding to a standard dict
         return dict(batch)
