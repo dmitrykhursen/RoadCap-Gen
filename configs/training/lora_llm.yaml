@@ -1,0 +1,37 @@
+# configs/training/lora_llm.yaml
+
+use_lora: true
+bf16: true
+batch_size: 4             
+learning_rate: 2e-4            # 2e-4 is standard for LLM LoRA
+grad_accumulation: 4           # Global Batch Size 128 (4 * 8 GPUs * 4)
+num_workers: 8
+epochs: 3                      # LoRA usually needs slightly more epochs than full FT
+logging_steps: 10      
+grad_checkpointing: true   
+warmup_ratio: 0.03             
+lr_scheduler_type: "cosine"    
+data_usage: 1.0
+
+# --- PEFT / LoRA Settings ---
+lora_r: 16                     # Change to 8 for your second experiment
+lora_alpha: 32                 # Change to 16 if r=8
+lora_dropout: 0.05
+
+# Tell peft_utils.py WHAT to train
+train_modules:
+  # - vision_model
+  - "language_model"           # Applies LoRA to the LLM
+  # - "multi_modal_projector"    # Trains the projector
+
+target_modules:                # The specific LLM layers to hit
+  - "q_proj"
+  - "k_proj"
+  - "v_proj"
+  - "o_proj"
+  - "gate_proj"
+  - "up_proj"
+  - "down_proj"
+  - "lm_head"
+
+projector_mode: "full"         # "full" means 100% unfreeze the projector (No LoRA on projector)
