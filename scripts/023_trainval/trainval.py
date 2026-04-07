@@ -16,6 +16,23 @@ import transformers
 import wandb
 from omegaconf import OmegaConf
 
+import sys
+
+# --- MUTE NON-ZERO GPUS ---
+# We do this globally before anything else runs!
+global_rank = int(os.environ.get("RANK", 0))
+# if global_rank != 0:
+    # Route all standard print() and error outputs to /dev/null
+    # sys.stdout = open(os.devnull, 'w')
+    # sys.stderr = open(os.devnull, 'w')
+    
+    # # Also optionally mute HuggingFace's internal loggers
+    # import logging
+    # import transformers
+    # logging.getLogger().setLevel(logging.ERROR)
+    # transformers.logging.set_verbosity_error()
+# --------------------------
+
 @hydra.main(version_base=None, config_path="../../configs", config_name="config")
 def main(cfg):
     # --- DDP SETUP & INFO START ---
@@ -78,7 +95,10 @@ def main(cfg):
     if hasattr(model.config, "image_grid_pinpoints"):
         custom_resolution = (672, 1008)
         model.config.image_grid_pinpoints = list(model.config.image_grid_pinpoints) + [custom_resolution]
-        
+    
+    # This expands the vocabulary matrix so the GPU doesn't crash on the new pad token
+    model.resize_token_embeddings(len(tokenizer))
+    
     if global_rank == 0: print(f"Loading Datasets...")
     
     # FOR WHOLE TRAIN DATASET ONLY
@@ -108,9 +128,14 @@ def main(cfg):
     )
 
     # 5. Apply LoRA
-    model = apply_peft(model, cfg)
+    model = apply_peft(model, cfg, use_depth_head=cfg.mode.name == "extended")
     if cfg.training.grad_checkpointing:
-        model.gradient_checkpointing_enable()
+        # enable_input_require_grads() is required for use_reentrant=True + PEFT:
+        # it ensures the frozen embedding layer's output has requires_grad=True so
+        # gradients can flow back through it to the LoRA adapters.
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        
 
     # 6. Training Arguments
     use_bf16 = getattr(cfg.training, "bf16", False)
@@ -141,7 +166,8 @@ def main(cfg):
         bf16=use_bf16,
         fp16=not use_bf16,
         dataloader_num_workers=cfg.training.num_workers,
-        remove_unused_columns=False, 
+        dataloader_pin_memory=False,  # kernel 4.18 < 5.5 min: pin-memory thread deadlocks with num_workers=0
+        remove_unused_columns=False,
         gradient_checkpointing=cfg.training.grad_checkpointing,
         warmup_ratio=cfg.training.warmup_ratio,
         lr_scheduler_type=cfg.training.lr_scheduler_type,
@@ -169,7 +195,12 @@ def main(cfg):
         # greater_is_better=True,
         
         # KEY DDP SETTINGS
-        ddp_find_unused_parameters=False, # Essential for PEFT/LoRA
+        # use_reentrant=True: avoids saved_tensors_hooks (Python callbacks from C++ CUDA).
+        # On kernel < 5.5, those callbacks deadlock the GIL during the first forward pass.
+        # use_reentrant=True runs entirely in C++ — safe on old kernels.
+        gradient_checkpointing_kwargs={'use_reentrant': False},
+        ddp_find_unused_parameters=False, # depth_projector is outside DDP forward but its grad always arrives via geo_loss backward.
+                                          # True caused "mark ready twice": DDP scanned it as unused, then backward marked it ready again.
         local_rank=local_rank,  
 
         # unpack optional args
@@ -192,7 +223,8 @@ def main(cfg):
         # eval_dataset=eval_dataset,
         processing_class=processor,
         data_collator=collator,
-        mode="simple"
+        mode=cfg.mode.name,
+        geo_weight=getattr(cfg.mode, "geo_weight", 0.5),
     )
 
     # Epoch 0 (Baseline / pretrained model) Evaluation ---
