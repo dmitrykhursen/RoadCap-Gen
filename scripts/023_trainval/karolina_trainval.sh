@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#SBATCH --job-name=trainval_llava_drivelm
+#SBATCH --job-name=trainval_llava_lora_drivelm
 #SBATCH --account=OPEN-36-38
-#SBATCH --time=40:00:00 # Time limit for running
+#SBATCH --time=47:00:00 # Time limit for running
 #SBATCH --partition=qgpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -25,7 +25,7 @@ DATASET="drivelm"
 
 # DATASET="roadvqa"
 
-TRAINING="full_finetune"
+# TRAINING="full_finetune"
 # TRAINING="full_finetune_cps_offline_best"
 # TRAINING="full_finetune_nju_online_best"
 
@@ -58,32 +58,57 @@ TRAINING="full_finetune"
 # experiment_name="karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v2_0_aug-all-data_val_data_usage-1.0_gpu8_bs4_180326"
 # experiment_name="karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v1_2_train-all-data_val_data_usage-1.0_gpu8_bs4_180326"
 
-experiment_name="karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v2_0_valaug-all-data_val_data_usage-1.0_gpu8_bs4_180326"
+# experiment_name="karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v2_0_valaug-all-data_val_data_usage-1.0_gpu8_bs4_180326"
+
+# next to eval
+# 250326
+# experiment_name="karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v1_2_val-all-data_val_data_usage-0.1_gpu8_bs4_250326"
+# experiment_name="karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v2_0_fromtrain300_85k-all_data_gpu8_bs4_250326"
+# experiment_name="karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v2_0_train85kaug-all-data_gpu8_bs4_250326"
+
+# next to eval
+# 250326
+TRAINING="lora_llm" 
+# experiment_name="train_llava_lora_llm_r16_DriveLM-v1_2_val-all-data_val_data_usage-0.1_gpu8_bs4"
+# experiment_name="train_llava_lora_llm_r16_MMPft_DriveLM-v1_2_val-all-data_val_data_usage-0.1_gpu8_bs4"
+# experiment_name="train_llava_lora_vit_llm_r16_MMPft_DriveLM-v1_2_val-all-data_val_data_usage-0.1_gpu8_bs4"
+
+# experiment_name="train_llava_lora_vit_llm_r16_MMPft_DriveLM-v2_0_train85kaug_qas_Qwen3-14B_nuscenes_think_no-tracks_dynamic_q_gpu8_bs4"
+# experiment_name="train_llava_lora_llm_r16_DriveLM-v2_0_train85kaug_qas_Qwen3-14B_nuscenes_think_no-tracks_dynamic_q_gpu8_bs4"
+
+# 070426
+# experiment_name="train_llava_lora_llm_r16_MMPft_DriveLM-v2_0_aug33k_qas_Qwen3-14B_nuscenes_think_no-tracks_dynamic_q_gpu8_bs4"
+# experiment_name="train_llava_lora_llm_r16_MMPft_DriveLM-v2_0_aug287k_qas_Qwen3-14B_nuscenes_think_rel-tracks_dynamic_q_gpu8_bs4"
+experiment_name="train_llava_lora_llm_r16_MMPft_DriveLM-v2_0_aug88k_qas_Qwen3-14B_nuscenes_think_global-tracks_dynamic_q_gpu8_bs4"
+
+
 
 
  
 # -----------------------------------------------
-
 # Run the command
+# -----------------------------------------------
+OUTPUT_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/${experiment_name}"
+mkdir -p "$OUTPUT_DIR"
 
-# # one gpu run
-# srun python scripts/02_finetuning/train.py \
-#     model=$MODEL     \
-#     dataset=$DATASET     \
-#     training=$TRAINING     \
-#     experiment_name=$experiment_name     \
+# Define the log file path inside that checkpoint directory
+LOG_FILE="${OUTPUT_DIR}/training_debug_${SLURM_JOB_ID}.log"
 
-# export TORCH_NCCL_TRACE_BUFFER_SIZE=2000
-# export TORCH_DISTRIBUTED_DEBUG=DETAIL
-# export NCCL_DEBUG=INFO
+echo "========================================================"
+echo "🚀 Starting multi-GPU training..."
+echo "📂 Checkpoints and full debug logs will be saved to:"
+echo "   $OUTPUT_DIR"
+echo "========================================================"
 
 # multi gpu run
 PYTHONPATH=. torchrun --nproc_per_node=$GPUS scripts/023_trainval/trainval.py \
-    model=$MODEL     \
-    dataset=$DATASET     \
-    training=$TRAINING     \
-    experiment_name=$experiment_name     \
-    +jobid=$SLURM_JOB_ID \
+    model=$MODEL \
+    dataset=$DATASET \
+    training=$TRAINING \
+    mode=simple \
+    experiment_name=$experiment_name \
+    +jobid=$SLURM_JOB_ID 2> >(tee -a "$LOG_FILE" >&2) | tee -a "$LOG_FILE"
 
+echo "🎉 Training script finished. Logs saved to $LOG_FILE"
 
 # sbatch scripts/023_trainval/karolina_trainval.sh
