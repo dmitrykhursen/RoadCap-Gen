@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=infer_llava_valeo
+#SBATCH --job-name=infer_llama_adapter_drivelm
 #SBATCH --account=OPEN-36-7
 #SBATCH --time=00:30:00 # Time limit for running
 #SBATCH --partition=qgpu_exp
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --gpus=4
+#SBATCH --gpus=2
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=dmytro.khursenko@valeo.com
 #SBATCH --output=logs/%x_%j.out
@@ -23,15 +23,15 @@ echo "🚀 Master Port: $MASTER_PORT"
 
 
 # Define variables
-MODEL="llava"
+# MODEL="llava"
 # DATASET="vqa_valeo_karolina"
 DATASET="drivelm"
-INFERENCE="drivelm_infer"
+# INFERENCE="drivelm_infer"
 GPUS=2
 
 # MODEL_CKPT="llava-hf/llava-v1.6-mistral-7b-hf"
-MODEL_CKPT="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-data_usage-1.0_gpu8_bs4/checkpoint-470"
-experiment_name="for_testing_purposes_infer_llava_finetuned_on_drivelm_train0.7_gpu4_bs8_nw4_e10_ckpt470_local_tokenizer"
+# MODEL_CKPT="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-data_usage-1.0_gpu8_bs4/checkpoint-470"
+# experiment_name="for_testing_purposes_infer_llava_finetuned_on_drivelm_train0.7_gpu4_bs8_nw4_e10_ckpt470_local_tokenizer"
 # experiment_name="infer_llava_finetuned_on_drivelm_train0.7_gpu4_bs8_nw4_e0_pretrained"
 # experiment_name="infer_llava_finetuned_on_drivelm_train1.0_all_data_gpu4_bs8_nw4_e0_pretrained"
 # MODEL_MODE="pretrained"
@@ -50,7 +50,7 @@ experiment_name="for_testing_purposes_infer_llava_finetuned_on_drivelm_train0.7_
 # trained on drivelm 0.7
 # MODEL_CKPT="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-data_usage-1.0_gpu8_bs4/checkpoint-47"
 # experiment_name="infer_llava_finetuned_on_drivelm_train0.7_gpu4_bs8_nw4_e1_ckpt47"
-MODEL_MODE="fullfinetune"
+# MODEL_MODE="fullfinetune"
 
 # MODEL_CKPT="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-data_usage-1.0_gpu8_bs4/checkpoint-235"
 # experiment_name="infer_llava_finetuned_on_drivelm_train0.7_gpu4_bs8_nw4_e5_ckpt235"
@@ -72,19 +72,30 @@ DATASET_PATH="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/external/DriveLM/challenge/
 # export TORCH_DISTRIBUTED_DEBUG=DETAIL
 # export NCCL_DEBUG=INFO
 
+### llama_adapter_v2 runs
+MODEL="llama_adapter_v2"
+INFERENCE="llama_adapter_v2_infer"
+MODEL_MODE="adapter"
+# MODEL_CKPT=""
+experiment_name="infer_llama_adapter_v2_tmp_gpu4_bs8_nw4_e5_pretrained"
+
+
+
+
 # -----------------------------------------------
 # Run the command
-torchrun --nproc_per_node=$GPUS --master_port=$MASTER_PORT scripts/04_inference/ddp_inference.py \
+PYTHONPATH=. torchrun --nproc_per_node=$GPUS --master_port=$MASTER_PORT scripts/04_inference/ddp_inference.py \
     model=$MODEL     \
     dataset=$DATASET     \
     inference=$INFERENCE     \
     experiment_name=$experiment_name     \
     inference.load_mode=$MODEL_MODE  \
-    inference.checkpoint_model=$MODEL_CKPT \
+    # inference.checkpoint_model=$MODEL_CKPT \
     dataset.data_path=$DATASET_PATH \
-    dataset.image_folder="/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/test_data" \
-    inference.tokenizer_path=$MODEL_CKPT
+    # dataset.image_folder="/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/nuscenes/test_data" \
+    # inference.tokenizer_path=$MODEL_CKPT
 
 
 
 # sbatch scripts/04_inference/karolina_infer.sh
+
