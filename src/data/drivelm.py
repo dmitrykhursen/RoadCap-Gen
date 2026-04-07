@@ -5,6 +5,13 @@ import random
 from torch.utils.data import Dataset
 from PIL import Image
 
+# 🌟 CRITICAL FIX FOR HPC DEADLOCKS 🌟
+# This prevents OpenCV (if imported anywhere in your pipeline) from clashing with PyTorch
+import cv2
+cv2.setNumThreads(0)
+cv2.ocl.setUseOpenCL(False)
+# -----------------------------------
+
 class DriveLMDataset(Dataset):
     def __init__(
         self, 
@@ -14,10 +21,12 @@ class DriveLMDataset(Dataset):
         image_processor=None, 
         split="train", 
         split_ratio=(0.8, 0.1, 0.1), # (Train, Val, Test)
-        data_usage=1.0, 
-        seed=42
+        data_usage=1.0,
+        seed=42,
+        depth_emb_folder=None
     ):
         self.image_folder = image_folder
+        self.depth_emb_folder = depth_emb_folder
         self.tokenizer = tokenizer
         self.image_processor = image_processor
         
@@ -140,62 +149,58 @@ class DriveLMDataset(Dataset):
             
         image_map = {}
         for p in image_paths:
-            # 1. Clean the path: "data/.../CAM_X/img.jpg" -> "CAM_X/img.jpg"
             parts = p.split('/')
             if len(parts) >= 2:
                 short_path = os.path.join(parts[-2], parts[-1]) 
             else:
                 short_path = p
             
-            # 2. Join with local root folder
             full_path = os.path.join(self.image_folder, short_path)
-            
-            # 3. Identify Camera
             cam_name = self._identify_camera(p)
             
             try:
                 img = Image.open(full_path).convert("RGB")
                 image_map[cam_name] = img
-            except Exception as e:
-                # print(f"⚠️ Warning: Could not load {full_path}")
+            except Exception:
                 pass
 
-        # --- 2. CREATE COLLAGE ---
-        final_image = self._create_surround_collage(image_map)
+        # Safety net: if all images failed to load, inject a blank collage
+        if len(image_map) == 0:
+            final_image = Image.new('RGB', (336 * 3, 336 * 2), color=(0, 0, 0))
+        else:
+            # --- 2. CREATE COLLAGE ---
+            final_image = self._create_surround_collage(image_map)
 
-        # # --- 3. TEXT ---
-        # # Note: RoadVQADataset returned 'question'/'answer'. 
-        # # DriveLM JSON has 'conversations'. We normalize it here.
-        # convs = data_item['conversations']
-        
-        # # LLaVA Prompt Logic:
-        # # Standard DriveLM format is: Human: <image>\nQuestion ... GPT: Answer
-        # question = convs[0]['value']
-        
-        # # NOTE: Your Collator/Processor handles <image> tokens.
-        # # It is safer to remove it from the raw text so we don't have double tokens.
-        # question = question.replace("<image>", "").strip()
-        
-        # answer = convs[1]['value']
 
-        # return {
-        #     "image": final_image,  
-        #     "question": question,
-        #     "answer": answer,
-        #     "id": data_item.get('id', str(index))
-        # }
-        
-        
+        # --- 1b. LOAD DEPTH LATENTS ---
+        depth_latents = None
+        if self.depth_emb_folder is not None:
+            loaded = []
+            for cam_name, _ in image_map.items():
+                for p in image_paths:
+                    if self._identify_camera(p) == cam_name:
+                        stem = os.path.splitext(os.path.basename(p))[0]
+                        emb_path = os.path.join(self.depth_emb_folder, cam_name, stem + ".pt")
+                        if os.path.isfile(emb_path):
+                            try:
+                                loaded.append(torch.load(emb_path, map_location="cpu", weights_only=True))
+                            except Exception:
+                                pass
+                        break
+            if len(loaded) > 0:
+                depth_latents = torch.stack(loaded, dim=0).float().mean(dim=0)
+
+        # --- 3. TEXT ---
         convs = data_item['conversations']
         question = convs[0]['value'].replace("<image>", "").strip()
         answer = convs[1]['value'].strip()
 
-        # Return RAW items, plus the metadata we need for the evaluation loop
         return {
-            "image": final_image,  
+            "image": final_image,
             "question": question,
             "answer": answer,
-            "img_path": data_item.get('image', ["unknown"])[0], 
-            "tag": data_item.get('tag', [-1]), 
-            "id": data_item.get('id', str(index))
+            "img_path": data_item.get('image', ["unknown"])[0],
+            "tag": data_item.get('tag', [-1]),
+            "id": data_item.get('id', str(index)),
+            "depth_latents": depth_latents,
         }
