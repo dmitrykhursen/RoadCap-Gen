@@ -33,8 +33,9 @@ def build_dataset(cfg, tokenizer, image_processor, split="train", data_usage=1.0
             split=split,
             # split_ratio=(0.8, 0.2, 0.0), # have val set as test set as well for local DriveLM evaluation/benchmark
             split_ratio=(0.0, 1.0, 0.0), # have val set as test set as well for local DriveLM evaluation/benchmark
-            
-            data_usage=data_usage
+
+            data_usage=data_usage,
+            depth_emb_folder=getattr(cfg.dataset, 'depth_emb_folder', None)
         )
         
     else:
