@@ -17,40 +17,75 @@ DATASET="drivelm_v1_2_val0.1"
 INFERENCE="drivelm_infer"
 LOAD_MODE="finetune"
 DATASET_PATH="/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/v1_2_val0.1_converted_llama_with_tags.json"
-EVAL_DATASET_PATH="/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/v1_2_val0.1.json"
+# EVAL_DATASET_PATH="/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/v1_2_val0.1.json"
+EVAL_DATASET_PATH="/mnt/proj1/eu-25-10/datasets/DRIVE_LM_zipped/v1_2_val0.1_converted_llama_with_tags.json"
+
 WANDB_PROJECT="RoadCap-Gen" 
 
-# running now
+# FIXING NOW
 # MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v1_2_combined-all-data_val_data_usage-1.0_gpu8_bs4_110326"
 # WANDB_RUN_ID="od1f9295"
+# JOB_TIMESTAMP=2026-03-18_19-09-52
 
-# running now
+# not to fix, finished training
 # MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v1_2_combined-all-data_val_data_usage-1.0_gpu8_bs4_CPSargs_110326"
 # WANDB_RUN_ID="f9q01hlm"
 
-# running now
+# not to fix, finished training
 # MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v1_2_combined-all-data_val_data_usage-1.0_gpu8_bs4_NJUargs_110326"
 # WANDB_RUN_ID="3l8wnnq6"
 
-# running now
+# FIXING NOW
 # MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v2_0_aug-all-data_val_data_usage-1.0_gpu8_bs4_180326"
 # WANDB_RUN_ID="bz5s4xpt"
+# JOB_TIMESTAMP=2026-03-18_17-59-37
 
-# running now
-MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v2_0_valaug-all-data_val_data_usage-1.0_gpu8_bs4_180326"
-WANDB_RUN_ID="v5toiuv9"
+# FIXING NOW
+# MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v2_0_valaug-all-data_val_data_usage-1.0_gpu8_bs4_180326"
+# WANDB_RUN_ID="v5toiuv9"
+# JOB_TIMESTAMP=2026-03-18_18-00-20
 
-###
-# waiting training to end
+# FIXING NOW
 # MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v1_2_train-all-data_val_data_usage-1.0_gpu8_bs4_180326"
 # WANDB_RUN_ID="koe24h7y"
+# JOB_TIMESTAMP=2026-03-20_04-21-13
 
-# waiting training to end
+
+# FIXING NOW
 # MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v2_0_trainaug-all-data_val_data_usage-1.0_gpu8_bs4_180326"
 # WANDB_RUN_ID="a7gevtvh"
+# JOB_TIMESTAMP=2026-03-20_04-23-12
 
 
+# new report results
+# MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v1_2_val-all-data_val_data_usage-0.1_gpu8_bs4_250326"
+# WANDB_RUN_ID="n3dfs4uc"
+# JOB_TIMESTAMP=2026-03-25_22-11-46
 
+# new report results
+# MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v1_2_val-all-data_val_data_usage-0.1_gpu8_bs4_250326"
+# WANDB_RUN_ID="n3dfs4uc"
+# JOB_TIMESTAMP=2026-03-25_22-11-46
+
+# # new report results
+# MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/train_llava_lora_llm_r16_DriveLM-v1_2_val-all-data_val_data_usage-0.1_gpu8_bs4"
+# WANDB_RUN_ID="fahroovz"
+
+# new report results
+# MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/train_llava_lora_llm_r16_MMPft_DriveLM-v1_2_val-all-data_val_data_usage-0.1_gpu8_bs4"
+# WANDB_RUN_ID="z4tqp9hr"
+
+# # new report results
+# MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/train_llava_lora_vit_llm_r16_MMPft_DriveLM-v1_2_val-all-data_val_data_usage-0.1_gpu8_bs4"
+# WANDB_RUN_ID="d4nw8j1s"
+
+# new report results (but also still training!!!)
+# MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/train_llava_lora_llm_r16_DriveLM-v2_0_train85kaug_qas_Qwen3-14B_nuscenes_think_no-tracks_dynamic_q_gpu8_bs4"
+# WANDB_RUN_ID="2jb8ri0e"
+
+# # new report results (but also still training!!!)
+MODEL_BASE_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/llava-v1.6-mistral-7b/train_llava_lora_vit_llm_r16_MMPft_DriveLM-v2_0_train85kaug_qas_Qwen3-14B_nuscenes_think_no-tracks_dynamic_q_gpu8_bs4"
+WANDB_RUN_ID="g2pwnrn7"
 
 MODEL_DIR_NAME=$(basename "$MODEL_BASE_DIR")
 WANDB_RUN_NAME="${MODEL_DIR_NAME}_${WANDB_RUN_ID}"
@@ -59,6 +94,10 @@ JOB_TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 # Define the master experiment name and folder path
 MASTER_EXP_NAME="infer_${MODEL}_${DATASET}_${LOAD_MODE}_llava-hf_llava-v1.6-mistral-7b-hf_gpu${GPUS}_${WANDB_RUN_NAME}_${JOB_TIMESTAMP}"
 MASTER_INFER_DIR="/mnt/proj1/eu-25-10/dmytro/RoadCap-Gen/output/inference/${MASTER_EXP_NAME}"
+
+
+# MASTER_INFER_DIR="infer_llava_drivelm_v1_2_val0.1_finetune_llava-hf_llava-v1.6-mistral-7b-hf_gpu8_karolina_torchrun_trainval_llava_fullfinetune_MMP_DriveLM-v1_2_val-all-data_val_data_usage-0.1_gpu8_bs4_250326_n3dfs4uc_2026-03-25_22-11-46"
+
 
 # Create the master folder
 mkdir -p "$MASTER_INFER_DIR"
@@ -99,7 +138,7 @@ for MODEL_CKPT in $CHECKPOINTS; do
         export MASTER_PORT=$(expr 10000 + $RANDOM % 1000)
         
         # NOTE: We are passing the combined path into experiment_name
-        torchrun --nproc_per_node=$GPUS --master_port=$MASTER_PORT scripts/04_inference/ddp_inference.py \
+        PYTHONPATH="." torchrun --nproc_per_node=$GPUS --master_port=$MASTER_PORT scripts/04_inference/ddp_inference.py \
             model=$MODEL \
             dataset=$DATASET \
             inference=$INFERENCE \
