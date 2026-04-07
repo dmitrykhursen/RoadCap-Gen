@@ -6,7 +6,7 @@ import torch
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 
-def apply_peft(model, cfg):
+def apply_peft(model, cfg, use_depth_head=False):
     """
     Applies the PEFT wrapper to efficient saving.
     """
@@ -34,7 +34,7 @@ def apply_peft(model, cfg):
         model = prepare_model_for_kbit_training(model)
 
     # 3. Get Targets
-    lora_targets, modules_to_save = _identify_training_targets(cfg, model)
+    lora_targets, modules_to_save = _identify_training_targets(cfg, model, use_depth_head=use_depth_head)
     
     print(f"   🎯 LoRA Targets: {lora_targets}")
     print(f"   💾 Modules to Save: {modules_to_save}")
@@ -68,7 +68,7 @@ def apply_peft(model, cfg):
     return model
 
 
-def _identify_training_targets(cfg, model):
+def _identify_training_targets(cfg, model, use_depth_head=False):
     """
     Decides WHICH modules to train. 
     Returns:
@@ -91,25 +91,37 @@ def _identify_training_targets(cfg, model):
         else:
             # FULL MODE: Add to "Save List" so PEFT handles the saving
             full_save_modules.append("multi_modal_projector")
+    
+    if "depth_projector" in modules_to_train:
+        # Add to "Save List" so PEFT handles saving it as a full-rank trainable module
+        full_save_modules.append("depth_projector")
 
-    # 2. Vision Tower Logic
-    if "vision_model" in modules_to_train:
-        lora_targets.extend(["vision_tower"])
+    # Scanning for BOTH LLM and Vision Tower
+    for name, module in model.named_modules():
+        # 2. Vision Tower Logic
+        if "vision_model" in modules_to_train:
+            if "vision_tower" in name:
+                # Target the specific Attention and MLP linear layers in CLIP
+                if any(target in name for target in ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"]):
+                    lora_targets.append(name)
 
-    # 3. LLM Logic
-    if "language_model" in modules_to_train:
-        lora_targets.extend(target_layers)
+        # 3. LLM Logic
+        if "language_model" in modules_to_train:
+            if "language_model" in name or "lm_head" in name:
+                # Use the target layers defined in your YAML config
+                if any(target in name for target in target_layers):
+                    lora_targets.append(name)
 
-    # # 4. Custom Heads (Extended Mode)
-    # if hasattr(model, "geo_head") or hasattr(model, "geo_projector"):
-    #     full_save_modules.append("geo_projector")
-    #     full_save_modules.append("geo_head")
+
+    # 4. Custom Heads (Extended Mode — depth distillation)
+    if use_depth_head and hasattr(model, "depth_projector"):
+        full_save_modules.append("depth_projector")
 
     return list(set(lora_targets)), list(set(full_save_modules))
 
 
 def print_trainable_parameters(model):
-    if hasattr(model, "print_trainable_parameters"):
+    if False: # hasattr(model, "print_trainable_parameters"):
         model.print_trainable_parameters()
     else:
         # Fallback: Manually count parameters for standard models
@@ -120,6 +132,9 @@ def print_trainable_parameters(model):
             if param.requires_grad:
                 trainable_params += param.numel()
                 print(f"✅ {name} : {param.shape}")
+            else:
+                print(f"[NOT TRAINED! xxx] {name} : {param.shape}")
+
 
         
         print(
