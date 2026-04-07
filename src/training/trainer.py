@@ -1,6 +1,7 @@
 import json
 import os
 import torch
+import torch.nn.functional as F
 from tqdm import tqdm
 import wandb
 from transformers import Trainer
@@ -23,17 +24,179 @@ class RoadCapTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.mode = mode
         self.geo_weight = geo_weight
-
+        self.custom_loss_tracker = {"lm_loss": 0.0, "geo_loss": 0.0, "steps": 0}
+    
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        # 1. Standard Forward
-        outputs = model(**inputs)
-        total_loss = outputs.loss 
+        # 1. Pop ALL custom auxiliary keys to prevent C++ deadlocks
+        depth_latents = inputs.pop("depth_latents", None)
+        depth_latents_mask = inputs.pop("depth_latents_mask", None)
+        
+        _ = inputs.pop("img_paths", None)
+        _ = inputs.pop("questions", None)
+        _ = inputs.pop("tags", None)
+        _ = inputs.pop("ids", None)
 
-        # 2. Extended Logic (Placeholder for now)
-        if self.mode == "extended":
-            pass # We will add this later!
+        # Unwrap DDP → PEFT
+        unwrapped = model
+        if hasattr(unwrapped, "module"):        
+            unwrapped = unwrapped.module
+        if hasattr(unwrapped, "base_model"):    
+            unwrapped = unwrapped.base_model
+        if hasattr(unwrapped, "model"):         
+            unwrapped = unwrapped.model
+
+        # 2. Extended Mode Logic
+        if self.mode == "extended" and depth_latents is not None:
+            inputs["output_hidden_states"] = True
+            outputs = model(**inputs)
+            hidden_states = outputs.hidden_states[-1]
+            outputs.hidden_states = None 
+
+            lm_loss = outputs.loss # 🌟 Grab the base LLM loss
+
+            depth_pred = unwrapped.project_to_depth_latents(hidden_states, inputs["attention_mask"]) 
+            depth_target = depth_latents.to(device=depth_pred.device, dtype=depth_pred.dtype)
+
+            if depth_latents_mask is not None and not depth_latents_mask.all():
+                valid = depth_latents_mask.to(depth_pred.device)
+                if valid.sum() > 0:
+                    geo_loss = F.smooth_l1_loss(depth_pred[valid], depth_target[valid])
+                else:
+                    geo_loss = 0.0 * depth_pred.sum() 
+            else:
+                geo_loss = F.smooth_l1_loss(depth_pred, depth_target)
+
+            total_loss = lm_loss + self.geo_weight * geo_loss
+
+            # 🌟 2. Add to tracker (Only on Rank 0 to prevent DDP lag)
+            if self.args.process_index == 0:
+                self.custom_loss_tracker["lm_loss"] += lm_loss.detach().item()
+                
+                # Handle cases where geo_loss is a pure float 0.0 or a Tensor
+                if isinstance(geo_loss, torch.Tensor):
+                    self.custom_loss_tracker["geo_loss"] += geo_loss.detach().item()
+                else:
+                    self.custom_loss_tracker["geo_loss"] += geo_loss
+                    
+                self.custom_loss_tracker["steps"] += 1
+
+        else:
+            outputs = model(**inputs)
+            total_loss = outputs.loss
 
         return (total_loss, outputs) if return_outputs else total_loss
+    
+    def log(self, logs: dict, *args, **kwargs):
+        """
+        Intercept the standard HF log function. 
+        """
+        if getattr(self.args, "process_index", 0) == 0 and self.custom_loss_tracker["steps"] > 0:
+            steps = self.custom_loss_tracker["steps"]
+            
+            # Calculate the average since the last time we logged
+            avg_lm_loss = self.custom_loss_tracker["lm_loss"] / steps
+            avg_geo_loss = self.custom_loss_tracker["geo_loss"] / steps
+            
+            # Inject our custom metrics into the HF logs dictionary
+            logs["train_lm_loss"] = avg_lm_loss
+            logs["train_geo_loss"] = avg_geo_loss
+            logs["train_geo_loss_weighted"] = avg_geo_loss * self.geo_weight
+
+            # Reset the tracker for the next logging window
+            self.custom_loss_tracker = {"lm_loss": 0.0, "geo_loss": 0.0, "steps": 0}
+
+        super().log(logs, *args, **kwargs)
+    
+    # def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+    #     # Pop ALL custom auxiliary keys so they don't break PyTorch!
+    #     #print(f"[DIAG] compute_loss called with mode={self.mode}")
+    #     depth_latents = inputs.pop("depth_latents", None)
+    #     depth_latents_mask = inputs.pop("depth_latents_mask", None)
+
+    #     _ = inputs.pop("img_paths", None)
+    #     _ = inputs.pop("questions", None)
+    #     _ = inputs.pop("tags", None)
+    #     _ = inputs.pop("ids", None)
+
+    #     #print(f"[DIAG] inputs keys after pop: {list(inputs.keys())}")
+
+    #     # Unwrap DDP → PEFT → LoraModel → RoadCapLLaVA.
+    #     # Use sequential `if` (NOT `while`): in some PEFT versions LoraModel.base_model
+    #     # is a property returning `self`, so `while` loops forever.
+    #     unwrapped = model
+    #     if hasattr(unwrapped, "module"):        # DDP wrapper
+    #         unwrapped = unwrapped.module
+    #     if hasattr(unwrapped, "base_model"):    # PeftModel → LoraModel
+    #         unwrapped = unwrapped.base_model
+    #     if hasattr(unwrapped, "model"):         # LoraModel → RoadCapLLaVA
+    #         unwrapped = unwrapped.model
+
+    #     #print(f"[DIAG] unwrapped type: {type(unwrapped).__name__}")
+
+    #     rank = self.args.process_index
+
+    #     # # 1. Extended Mode: use last hidden state captured by the permanent norm hook
+    #     # # registered in RoadCapLLaVA.from_pretrained (no per-forward hook needed).
+    #     # if self.mode == "extended" and depth_latents is not None:
+    #     #     #print(f"[DIAG rank={rank}] >>> extended forward", flush=True)
+    #     #     outputs = model(**inputs)
+    #     #     #print(f"[DIAG rank={rank}] <<< forward done, computing geo loss", flush=True)
+
+    #     #     total_loss = outputs.loss
+
+    #     #     hidden_states = unwrapped._last_hidden_state  # [B, seq_len, 4096]
+    #     #     depth_pred = unwrapped.project_to_depth_latents(
+    #     #         hidden_states, inputs["attention_mask"]
+    #     #     )  # [B, 32, 35, 63]
+
+    #     #     depth_target = depth_latents.to(device=depth_pred.device, dtype=depth_pred.dtype)
+    #     #     if depth_latents_mask is not None and not depth_latents_mask.all():
+    #     #         valid = depth_latents_mask.to(depth_pred.device)
+    #     #         geo_loss = F.smooth_l1_loss(depth_pred[valid], depth_target[valid])
+    #     #     else:
+    #     #         geo_loss = F.smooth_l1_loss(depth_pred, depth_target)
+
+    #     #     total_loss = total_loss + self.geo_weight * geo_loss
+    #     #     #print(f"[DIAG rank={rank}] loss={total_loss.item():.4f} lm={outputs.loss.item():.4f} geo={geo_loss.item():.4f}")
+    #     # print(f"[DIAG] depth_latents: {depth_latents}   depth_latents_mask: {depth_latents_mask.shape if depth_latents_mask is not None else None}")
+    #     if self.mode == "extended": # and depth_latents is not None:
+            
+    #         # 🌟 Tell the model to return hidden states natively
+    #         inputs["output_hidden_states"] = True
+            
+    #         outputs = model(**inputs)
+    #         total_loss = outputs.loss
+
+    #         # 🌟 Extract ONLY the final layer's hidden states [B, seq_len, 4096]
+    #         hidden_states = outputs.hidden_states[-1]
+            
+    #         # 🌟 CRITICAL MEMORY TRICK: Instantly delete the massive tuple 
+    #         # to free ~8GB of VRAM before the backward pass starts!
+    #         outputs.hidden_states = None 
+
+    #         # Project to depth
+    #         depth_pred = unwrapped.project_to_depth_latents(
+    #             hidden_states, inputs["attention_mask"]
+    #         )  
+
+    #         depth_target = depth_latents.to(device=depth_pred.device, dtype=depth_pred.dtype)
+
+    #         if depth_latents_mask is not None and not depth_latents_mask.all():
+    #             valid = depth_latents_mask.to(depth_pred.device)
+    #             geo_loss = F.smooth_l1_loss(depth_pred[valid], depth_target[valid])
+    #         else:
+    #             geo_loss = F.smooth_l1_loss(depth_pred, depth_target)
+
+    #         total_loss = total_loss + self.geo_weight * geo_loss
+
+    #     # 2. Simple Mode / no depth latents: standard forward pass only
+    #     else:
+    #         #print(f"[DIAG rank={rank}] >>> simple forward", flush=True)
+    #         outputs = model(**inputs)
+    #         total_loss = outputs.loss
+    #         #print(f"[DIAG rank={rank}] <<< simple forward done, loss={total_loss.item():.4f}", flush=True)
+
+    #     return (total_loss, outputs) if return_outputs else total_loss
     
     def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval"):
         """
@@ -145,7 +308,7 @@ class RoadCapTrainer(Trainer):
                         "question": gathered_questions[i]
                     }
                     
-            print(f"Total Unique Validated Samples: {len(unique_results)}")
+            #print(f"Total Unique Validated Samples: {len(unique_results)}")
 
             # Process all unique gathered results
             for uid, res in unique_results.items():
@@ -191,9 +354,9 @@ class RoadCapTrainer(Trainer):
             current_epoch = int(self.state.epoch) if self.state.epoch is not None else 0
             save_path = os.path.join(self.args.output_dir, f"val_vqa_results_epoch_{current_epoch}.jsonl")
             
-            print(f"saving val res to {save_path}")
-            print(f"final score: {final_score}")
-            print(f"pure coordinate match score: {pure_coordinate_match_score}")
+            #print(f"saving val res to {save_path}")
+            #print(f"final score: {final_score}")
+            #print(f"pure coordinate match score: {pure_coordinate_match_score}")
 
             eval_metrcis_res = {
                 f"{prefix}_drivelm_final_score": final_score,
