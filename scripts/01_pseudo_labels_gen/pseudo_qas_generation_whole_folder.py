@@ -9,6 +9,8 @@ from bisect import bisect_left
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+from pyquaternion import Quaternion
 import regex as re
 import torch
 import yaml
@@ -135,15 +137,15 @@ def preprocess_scene_tracks(raw_tracks: Dict[str, Any], dataset_name: str) -> tu
 def detections_to_text(
     data: Dict[str, Any],
     camera_name: str,
+    include_tracks: bool,
+    global_coords: bool,
     tracks_by_object_id: Optional[Dict[str, Any]] = None,
     timestamp_to_frame: Optional[Dict[str, int]] = None,
     frame: Optional[str] = None,
     frames_back: int = 2,
     track_type: str = "m",
-    include_tracks: bool = False,
     dataset_name: str = "valeo",
-    global_coords: bool = False,
-) -> Tuple[List[Dict[str, Any]], Optional[List[float]]]:
+) -> Tuple[List[Dict[str, Any]], Optional[Tuple[List[float], List[float]]]]:
     if frame is None:
         raise ValueError("Frame must be provided to extract frame number.")
 
@@ -181,9 +183,6 @@ def detections_to_text(
                 tracks = tracks_by_object_id[obj["id"]]
 
                 if tracks:
-                    if global_coords and dataset_name == "nuscenes":
-                        ego_pos = tracks["track"]["ego_translation"]
-
                     window, missing = get_past(
                         tracks["track"],
                         tracks["frame_ints"],
@@ -192,6 +191,9 @@ def detections_to_text(
                     )
 
                     if window:
+                        if global_coords and dataset_name == "nuscenes":
+                            ego_pos = (window[-1]["ego_translation"], window[-1]["ego_rotation"])
+
                         if frame_idx in missing:
                             time_range = range(len(window), 0, -1)
                         else:
@@ -205,7 +207,7 @@ def detections_to_text(
                                 fields = ["x", "y", "z"]
 
                             def get_value_m(d):
-                                return [d[field] for field in fields]
+                                return [round(d[field], 3) for field in fields]
 
                             get_value = get_value_m
                         else:
@@ -228,7 +230,8 @@ def generate_prompt(
     config_prompts: Dict[str, str],
     config_prompts_fewshot: Dict[str, str],
     directions: List[str],
-    tracks: bool = False,
+    global_coords: bool,
+    tracks: bool,
     track_type: str = "m",
     dataset_name: str = "nuscenes",
 ) -> str:
@@ -246,7 +249,7 @@ def generate_prompt(
     parts.append(config_prompts["coordinate_system"])
 
     if tracks:
-        parts.append(f"\n{config_prompts[dataset_name + '_tracks_coords_' + track_type]}")
+        parts.append(f"\n{config_prompts[dataset_name + '_tracks_coords_' + ('global_' if global_coords else '') + track_type]}")
 
     parts.append(f"\n{config_prompts['detected_objects' + ('_tracks' if tracks else '')]}")
 
@@ -568,7 +571,7 @@ def main():
                 tracks_by_id = {d["object_id"]: d for d in cleaned_tracks["tracks"]}
 
             q_dist = distribute_by_ratio(q_ratios, num_frames * args.number_of_questions)
-            pattern = r"\b\w+_\d+\b"
+            pattern = r"\b\S*\.\w+_\d+\b"
 
             for frame_idx in tqdm(range(num_frames), desc=f"Frames for {scene_name}"):
                 frame_master_id = cam_json_files[ref_cam][frame_idx].stem
@@ -577,7 +580,7 @@ def main():
 
                 prefix = "Here is the list of objects detected in the scene from all cameras. Use them to generate the QA pairs:"
                 combined_scene_text = []
-
+                ego_poses = []
                 for cam in cameras:
                     cam_dir = Path(args.yolo_path) / cam / scene_name
                     processed_json = cam_dir / "merged_processed.json"
@@ -602,13 +605,31 @@ def main():
                         track_type=args.track_type,
                         include_tracks=args.use_tracks,
                         dataset_name=args.dataset_name,
+                        global_coords=args.global_coords,
                     )
                     if cam_text:
                         combined_scene_text.extend(cam_text)
+                    
+                    if ego_pos is not None:
+                        ego_poses.append(ego_pos)
                 object_lines = [json.dumps(obj, separators=(",", ":")) for obj in combined_scene_text]
                 json_data = "[\n" + ",\n".join(object_lines) + "\n]"
-                if ego_pos is not None:
-                    prefix += f"\nThe ego vehicle's position (x, y, z) is approximately: {ego_pos}"
+                if args.global_coords:
+                    if ego_poses:
+                        ego_pos = ego_poses[0]
+                        q = Quaternion(ego_pos[1])
+                        # Get the yaw angle in radians (pyquaternion returns yaw, pitch, roll)
+                        yaw_radians = q.yaw_pitch_roll[0]
+                        # Convert to degrees for the LLM (makes it much easier for the model to reason)
+                        yaw_degrees = round(np.degrees(yaw_radians), 2)
+                        prefix = (
+                            f"\nThe ego vehicle's position (x, y, z) is: {ego_pos[0]}\n"
+                            + f"Heading (Yaw): {yaw_degrees}° (0° is East/Global +X, 90° is North/Global +Y)\n"
+                            + prefix
+                        )
+                    else:
+                        print(f"Warning: No ego positions found for {scene_name} frame {frame_idx}, but global_coords is enabled. Cannot proceed without ego position for global coordinates.")
+                        continue
                 final_scene_text = prefix + "\n" + json_data
 
                 # Create a deterministic seed based on the scene
@@ -623,7 +644,16 @@ def main():
                 with torch.inference_mode():
                     for i, q in enumerate(questions):
                         prompt = generate_prompt(
-                            q, None, final_scene_text, config_prompts, config_prompts_fewshot, directions, args.use_tracks, args.track_type
+                            q=q,
+                            description=None,
+                            objects=final_scene_text,
+                            config_prompts=config_prompts,
+                            config_prompts_fewshot=config_prompts_fewshot,
+                            directions=directions,
+                            global_coords=args.global_coords,
+                            tracks=args.use_tracks,
+                            track_type=args.track_type,
+                            dataset_name=args.dataset_name,
                         )
                         if used_objs and "<obj>" in q:
                             prompt += f"\nAvoid reusing: {', '.join(sorted(used_objs))}"
@@ -635,7 +665,8 @@ def main():
                             clean_content = "{" + f'"Question_{i}": ' + clean_content + "}"
                             parsed = json.loads(clean_content)
                             scene_results.update(parsed)
-                            used_objs.update(re.findall(pattern, content))
+                            question_text = parsed[f"Question_{i}"]["question"]
+                            used_objs.update(re.findall(pattern, question_text))
                         except json.JSONDecodeError as e:
                             print(f"[Warning] JSON decode error for {scene_name} frame {frame_idx} question {i}: {e}\n{content}")
 
@@ -643,7 +674,7 @@ def main():
 
         except Exception as e:
             print(f"❌ Error in [{scene_idx + 1}/{total_scenes}] {scene_name}: {e}")
-            traceback.print_exc()
+            print(traceback.print_exc())
     print("Job complete.")
 
 

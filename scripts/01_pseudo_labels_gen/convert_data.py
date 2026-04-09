@@ -3,7 +3,11 @@ import hashlib
 import json
 from collections import defaultdict
 from pathlib import Path
+import sys
 
+project_root = str(Path(__file__).resolve().parents[2])  # Adjust parents index if your script is deeper
+if project_root not in sys.path:
+    sys.path.append(project_root)
 from src.utils.qas_generation_helper import load_json
 
 
@@ -60,11 +64,11 @@ def process_file(input_path: Path):
         fout.write(json.dumps(results, indent=2, ensure_ascii=False))
 
 
-def process_file_nuscenes(input_path: Path, ids_images: dict):
+def process_file_nuscenes(folder: Path, input_path: Path, ids_images: dict):
     orig_jsons_path = "/scratch/project/eu-25-10/datasets/nuScenes_metadata/annotations_in_valeo_format/"
     root_img_paths = Path("/scratch/project/eu-25-10/datasets/nuScenes/samples/")
 
-    output_path = input_path.parent / "../converted" / f"{input_path.stem}_converted.json"
+    output_path = input_path.parent / f"../{folder.name}_converted" / f"{input_path.stem}_converted.json"
     output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -82,9 +86,11 @@ def process_file_nuscenes(input_path: Path, ids_images: dict):
 
                 if not scene_id:
                     print(f"Scene ID not found for {scene}")
+                    scene_id = "generated" + hashlib.md5(scene.encode()).hexdigest()
+
 
                 if not frame_id:
-                    # print(f"Frame ID not found for {frame}")
+                    print(f"Frame ID not found for {frame}")
                     frame_id = "generated" + hashlib.md5(frame.encode()).hexdigest()
                 not_found = []
                 if not images:
@@ -152,8 +158,8 @@ def main():
     ids_images = get_match_ids_img(full_train)
 
     folder: Path = args.folder
-    for jsonl_file in folder.glob("*.jsonl"):
-        process_file_nuscenes(jsonl_file, ids_images)
+    for jsonl_file in folder.rglob("*.jsonl"):
+        process_file_nuscenes(folder, jsonl_file, ids_images)
 
     # for jsonl_file in folder.glob("*.jsonl"):
     #     process_file(jsonl_file)

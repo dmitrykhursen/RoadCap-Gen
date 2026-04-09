@@ -54,18 +54,19 @@ prompts:
   answer_rules: |
     ### ANSWER RULES
     - Grounding: Your answer MUST be supported by the provided object list.
-    - Prioritization: Focus on vehicles and objects closer to the ego vehicle.
+    - Prioritization: Focus on vehicles, objects closer to the ego vehicle and objects in the path of the ego vehicle.
     - Formatting: Do NOT use internal IDs (e.g., "car_0") in the answer outside of tags. Use descriptive phrases instead (e.g., "the car on the left").
     - Output Format: You must output EXACTLY the following JSON structure and nothing else.
     {
         "question": "...", // MUST contain correctly formatted object tags
         "reasoning": "...", // MUST include consice spatial analysis
-        "short_answer": "..." // MUST be brief (yes/no or 1-2 sentences)
+        "short_answer": "..." // MUST be brief (yes/no or 1-2 sentences) dont add precise distances, just general spatial relationships
     }
 
   detected_objects_tracks: |
     ### DETECTED OBJECTS DATA
     Use the exact question template provided without modifications.
+    pos_history is taken from the previous frames (t-2, t-1) and the current frame (t-0)
     Data Schema: 
     {"id":"Camera_ObjectType","bbox":[x, y, width, height in px],"center":[cx, cy in px],"pos_history":[[x,y,z,d at t-2],[x,y,z,d at t-1],[x,y,z,d at t-0] in meters]}
     *Note: If an object is new at t=0, pos_history will only contain one array: [x,y,z,d at t-0].*
@@ -90,6 +91,17 @@ prompts:
     - z > 0: up, z < 0: down
     - distance: Euclidean distance from ego vehicle
     the position history is captured roughly every 500 ms
+
+  nuscenes_tracks_coords_global_m: |
+    3D Global Map Coordinates (nuScenes format: [x, y, z, distance in meters]):
+    - x: Fixed global map X-axis (points East), NOT relative to the car.
+    - y: Fixed global map Y-axis (points North), NOT relative to the car.
+    - z: Absolute elevation/height in the global map.
+    - distance: Euclidean distance from ego vehicle to the object.
+    the position history is captured roughly every 500 ms
+
+    Crucial Instruction: 
+    To determine if an object is in front, behind, or to the side of the car, you must use the Ego Vehicle's Global Position and Heading to determine which way the windshield is facing
 
   valeo_dataset_car_in_view: |
     Ego vehicle:

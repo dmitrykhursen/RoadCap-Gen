@@ -46,7 +46,7 @@ for track_file_path in scenes_root_dir.rglob(input_filename):
             pose_token = filename_to_pose_token[frame_name]
             pose = nusc.get("ego_pose", pose_token)
 
-            ego_translation = np.array(pose["translation"]) # also ego position in 3D (global coordinates)
+            ego_translation = np.array(pose["translation"])  # also ego position in 3D (global coordinates)
             ego_rotation = Quaternion(pose["rotation"])
 
             # Ensure the global coordinates actually exist in this frame
