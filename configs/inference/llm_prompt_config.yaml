@@ -8,8 +8,8 @@ prompts:
 
   position: |
     Whenever the question template contains <position>, replace it with **exactly one** of the following phrases, that describes the position of the referenced object relative to the ego vehicle:
-      - "left side of the ego vehicle"
-      - "right side of the ego vehicle"
+      - "left of the ego vehicle"
+      - "right of the ego vehicle"
       - "ahead of the ego vehicle"
 
   important_objects: |
@@ -34,7 +34,6 @@ prompts:
     **OBJECT SELECTION RULES**
     - Use ONLY objects from the provided list.
     - NEVER reuse the same object for multiple <obj> tokens.
-    - Prefer closer objects and vehicles.
     - Choose objects that make sense for the question.
 
     Apart from replacing <obj>, do NOT modify the question template in any way.
@@ -107,6 +106,15 @@ prompts:
     Ego vehicle:
     - bounding box [0, 1620, 1600, 428], midpoint [800, 1834]
     - always at bottom middle-left, partially visible, moving forward along the y axis in the image coordinates
+
+  yes_no_questions: |
+    Only answer Yes. or No. Do not provide any additional information in the short answer
+
+  multiple_choice_questions: |
+    Only answer with the provided letter corresponding to the correct option. Do not provide any additional information in the short answer.
+
+  multiple_parts: |
+    Keep all the provided question parts in the question and answer all parts in the reasoning and answer. Do not drop any part of the question
 
 fewshot:
   tracks_m: |

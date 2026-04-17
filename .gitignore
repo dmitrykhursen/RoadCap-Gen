@@ -2,7 +2,7 @@
 *.egg-info/
 build/
 dist/
-
+.venv
 # --- Caches  ---
 **/__pycache__/
 *.pyc
@@ -13,3 +13,5 @@ data/*
 wandb/*
 .vscode/*
 logs/*
+distributed_counts/*
+logs/
