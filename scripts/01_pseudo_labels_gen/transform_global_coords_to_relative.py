@@ -18,7 +18,7 @@ for sd in nusc.sample_data:
     filename_to_pose_token[basename] = sd["ego_pose_token"]
 
 # 3. Define your directories and filenames
-scenes_root_dir = Path("/scratch/project/eu-25-10/datasets/nuScenes_metadata/tracks_by_scene")
+scenes_root_dir = Path("/scratch/project/eu-25-10/datasets/nuScenes_metadata/tracks_by_scene_v2")
 input_filename = "tracks.json"  # Change this if your raw files are named differently
 output_filename = "tracks_ego_centric.json"
 # 4. Loop over all scene folders recursively
@@ -26,8 +26,6 @@ print(f"Scanning '{scenes_root_dir}' for '{input_filename}' files...")
 
 # .rglob() automatically looks inside all subfolders for the target file
 for track_file_path in scenes_root_dir.rglob(input_filename):
-    print(f"Processing: {track_file_path}")
-
     # Load the raw track JSON
     with open(track_file_path, "r") as f:
         data = json.load(f)
