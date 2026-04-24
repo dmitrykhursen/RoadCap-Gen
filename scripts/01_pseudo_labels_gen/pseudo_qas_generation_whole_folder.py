@@ -26,6 +26,91 @@ try:
 except ImportError:
     run_yolo_processing = None
 
+INIT_QUESTION = "What are the important objects in the current scene? Those objects will be considered for the future reasoning and driving decision."
+
+YES_NO_QUESTIONS = set(
+    [
+        "Would <obj> be in the moving direction of the ego vehicle?",
+        "Will <obj> be in the moving direction of <obj>?",
+        "Will <obj> change its motion state based on <obj>?",
+        "Would <obj> take <obj> into account?",
+    ]
+)
+
+OPTIONS_QUESTIONS = set(
+    [
+        "Predict the behavior of the ego vehicle. Please select the correct answer from the following options:",
+        "What is the moving status of object <obj>? Please select the correct answer from the following options:",
+    ]
+)
+
+MULTIPLE_PARTS_QUESTIONS = (
+    set(
+        [
+            "What actions could the ego vehicle take based on <obj>? Why take this action and what's the probability?",
+            "What object should the ego vehicle notice first when the ego vehicle is getting to the next possible location? What is the state of the object that is first noticed by the ego vehicle and what action should the ego vehicle take? What object should the ego vehicle notice second when the ego vehicle is getting to the next possible location? What is the state of the object perceived by the ego vehicle as second and what action should the ego vehicle take? What object should the ego vehicle notice third? What is the state of the object perceived by the ego vehicle as third and what action should the ego vehicle take?",
+        ]
+    )
+    | OPTIONS_QUESTIONS
+)
+
+EGO_ACTIONS = set(
+    [
+        "In this scenario, what are dangerous actions to take for the ego vehicle?",
+        "In this scenario, what are safe actions to take for the ego vehicle?",
+    ]
+)
+
+NO_ADDITIONAL_INFO = (
+    set(
+        [
+            "What actions taken by the ego vehicle can lead to a collision with <obj>?",
+            "Based on <obj> in this scene, what is the most possible action of the ego vehicle?",
+            "Based on the observation of <obj>, what actions may <obj> take?",
+            "What is the priority of the objects that the ego vehicle should consider?(in descending order)",
+        ]
+    )
+    | YES_NO_QUESTIONS
+    | OPTIONS_QUESTIONS
+    | EGO_ACTIONS
+)
+
+QUESTION_RULES = [
+    (YES_NO_QUESTIONS, ["yes_no_questions"]),
+    (OPTIONS_QUESTIONS, ["multiple_choice_questions"]),
+    # (MULTIPLE_PARTS_QUESTIONS, ["multiple_parts"]), # add manually at the end
+    # (NO_ADDITIONAL_INFO, ["no_additional_info"]), # add manually at the end
+    (EGO_ACTIONS, ["actions_for_ego"]),
+    (
+        {INIT_QUESTION},
+        ["init_q"],
+    ),
+    (
+        {"What actions could the ego vehicle take based on <obj>? Why take this action and what's the probability?"},
+        ["actions_probability"],
+    ),
+    (
+        {"What actions taken by the ego vehicle can lead to a collision with <obj>?"},
+        ["collison"],
+    ),
+    (
+        {
+            "What object should the ego vehicle notice first when the ego vehicle is getting to the next possible location? What is the state of the object that is first noticed by the ego vehicle and what action should the ego vehicle take? What object should the ego vehicle notice second when the ego vehicle is getting to the next possible location? What is the state of the object perceived by the ego vehicle as second and what action should the ego vehicle take? What object should the ego vehicle notice third? What is the state of the object perceived by the ego vehicle as third and what action should the ego vehicle take?"
+        },
+        ["notice_three_obj"],
+    ),
+    (
+        {
+            "Based on <obj> in this scene, what is the most possible action of the ego vehicle?",
+            "Based on the observation of <obj>, what actions may <obj> take?",
+        },
+        ["most_possible_action"],
+    ),
+    (
+        {"What is the priority of the objects that the ego vehicle should consider?(in descending order)"},
+        ["priority_of_objects"],
+    ),
+]
 
 # =============================================
 # Helper Functions & Logic
@@ -145,7 +230,7 @@ def detections_to_text(
     frames_back: int = 2,
     track_type: str = "m",
     dataset_name: str = "valeo",
-) -> Tuple[List[Dict[str, Any]], Optional[Tuple[List[float], List[float]]]]:
+) -> Tuple[List[Dict[str, str | float]], Optional[List[Tuple[List[float], List[float]]]]]:
     if frame is None:
         raise ValueError("Frame must be provided to extract frame number.")
 
@@ -191,9 +276,6 @@ def detections_to_text(
                     )
 
                     if window:
-                        if global_coords and dataset_name == "nuscenes":
-                            ego_pos = (window[-1]["ego_translation"], window[-1]["ego_rotation"])
-
                         if frame_idx in missing:
                             time_range = range(len(window), 0, -1)
                         else:
@@ -219,8 +301,24 @@ def detections_to_text(
 
                         obj_dict["pos_history"] = [get_value(d_item) for _, d_item in zip(time_range, window)]
 
+                        if dataset_name == "nuscenes":
+                            ego_pos = [(win["ego_translation"], win["ego_rotation"]) for _, win in zip(time_range, window)]
             objects_list.append(obj_dict)
     return objects_list, ego_pos
+
+
+def add_formatting(parts: list, answer_formatting: Dict[str, str], q: str) -> list[str]:
+    for question_set, formatting_keys in QUESTION_RULES:
+        if q in question_set:
+            for key in formatting_keys:
+                parts.append("\n" + answer_formatting[key])
+
+    if q in MULTIPLE_PARTS_QUESTIONS:
+        parts.append(answer_formatting["multiple_parts"])
+    if q in NO_ADDITIONAL_INFO:
+        parts.append(answer_formatting["no_additional_info"])
+
+    return parts
 
 
 def generate_prompt(
@@ -229,6 +327,8 @@ def generate_prompt(
     objects: str,
     config_prompts: Dict[str, str],
     config_prompts_fewshot: Dict[str, str],
+    config_prompts_answer_formatting: Dict[str, str],
+    enforce_formatting: bool,
     directions: List[str],
     global_coords: bool,
     tracks: bool,
@@ -240,7 +340,7 @@ def generate_prompt(
         config_prompts["answer_rules"],
     ]
 
-    if "<obj>" in q:
+    if "<obj>" in q or q in MULTIPLE_PARTS_QUESTIONS or q in INIT_QUESTION:
         parts.append(config_prompts["obj"])
         parts.append(config_prompts_fewshot["obj"])
     else:
@@ -256,21 +356,25 @@ def generate_prompt(
     parts.append(objects)
 
     if dataset_name == "valeo":
-        parts.append(f"{config_prompts['valeo_dataset_car_in_view']}")
+        parts.append(config_prompts["valeo_dataset_car_in_view"])
 
     if "<position>" in q:
-        parts.append(f"\n{config_prompts['position']}")
+        parts.append("\n" + config_prompts["position"])
 
     if any(x in q for x in ["important objects", "priority"]):
-        parts.append(f"\n{config_prompts['important_objects']}")
+        parts.append("\n" + config_prompts["important_objects"])
 
     if description:
         parts.append(f"\nThe scene description is:\n {description}")
 
     if "following options:" in q:
-        q += " " + " ".join(get_prefixed_permutation(directions))
+        parts.append(f"\nThe question to use is:\n {q + ' ' + ' '.join(get_prefixed_permutation(directions))}\n")
+    else:
+        parts.append(f"\nThe question to use is:\n {q}\n")
 
-    parts.append(f"\nThe question to use is:\n {q}\n")
+    if enforce_formatting:
+        parts = add_formatting(parts, config_prompts_answer_formatting, q)
+
     return "".join(parts)
 
 
@@ -282,7 +386,7 @@ def generate_prompt(
 def generate_experiment_name(args: argparse.Namespace) -> str:
     model_short = args.model.split("/")[-1]
     think_tag = "think" if args.thinking else "no-think"
-    track_tag = f"tracks-{args.track_type}" if args.use_tracks else "no-tracks"
+    track_tag = f"tracks-{args.track_type}" if args.tracks_path is not None else "no-tracks"
     return f"{model_short}_{args.dataset_name}_{think_tag}_{track_tag}_q{args.number_of_questions}"
 
 
@@ -453,7 +557,6 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="Qwen/Qwen3-14B")
     parser.add_argument("--thinking", action="store_true")
-    parser.add_argument("--use_tracks", action="store_true")
     parser.add_argument("--track_type", choices=["m", "px"], default="m")
     parser.add_argument("--yolo_path", type=str, required=True, help="Path to annotations/metadata")
     parser.add_argument("--output_folder", type=str, default="data/nuscenes_tracks")
@@ -464,11 +567,18 @@ def parse_args():
     parser.add_argument("--frames_back", type=int, default=2)  # 2 back and the current so 3
     parser.add_argument("--tracks_path", type=str, default=None)
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing results")
+    parser.add_argument("--no_init_q", action="store_true", help="Dont include the init question")
+    parser.add_argument("--answer_formatting", action="store_true", help="Try to enforce DriveLM answer formatting")
     parser.add_argument("--scene_prefix", type=str, default=None, help="Filter scenes by prefix (e.g., 'n008' or 'n015')")
     parser.add_argument(
         "--global_coords",
         action="store_true",
         help="When using the nuScenes dataset with tracks, use global coordinates instead of ego-centric ones.",
+    )
+
+    # --- New Test Argument ---
+    parser.add_argument(
+        "--test", action="store_true", help="Test mode: generate 5 of each q with test_ratio > 0.5 uniformly in one folder, print prompts."
     )
 
     # --- Chunking Arguments for SLURM Arrays ---
@@ -487,9 +597,20 @@ def main():
     with open(args.prompts_config, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+    # --- Test Mode Initialization ---
+    test_question_pool = []
+    if args.test:
+        target_questions = [entry["question"] for entry in ratio_data if entry.get("ratio_test", 0) > 0.5]
+        target_questions.append(INIT_QUESTION)
+        test_question_pool = target_questions * 4
+        rng_test = random.Random(42)  # fixed seed to ensure uniformity
+        rng_test.shuffle(test_question_pool)
+        print(f"\n[TEST MODE ENABLED] Selected {len(target_questions)} question types. Pool size: {len(test_question_pool)}.")
+
     q_ratios = get_test_distribution(ratio_data)
     config_prompts = config["prompts"]
     config_prompts_fewshot = config["fewshot"]
+    config_prompts_answer_formatting = config["answer_formatting"]
     directions = ["Turn right.", "Drive backward.", "Going ahead.", "Turn left."]
 
     cameras, all_scenes = get_cameras_and_scenes(args.yolo_path)
@@ -511,10 +632,15 @@ def main():
     responder = ModelRespondervllm(args.model, thinking=args.thinking)
 
     for scene_idx, scene_name in tqdm(enumerate(all_scenes), total=total_scenes):
-        # Output directory parsing
-        output_dir = Path(args.output_folder) / scene_name
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_file = output_dir / f"qas_{scene_name}_{exp_name}.jsonl"
+        # --- Output Directory Parsing ---
+        if args.test:
+            output_dir = Path("data/prompt_testing")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / f"test_results_{exp_name}.jsonl"
+        else:
+            output_dir = Path(args.output_folder) / scene_name
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / f"qas_{scene_name}_{exp_name}.jsonl"
 
         try:
             # ---- Load Multi-Camera Files & Merge Data ----
@@ -538,7 +664,7 @@ def main():
 
             # Check for existing progress to resume mid-scene
             processed_frames = set()
-            if output_file.exists() and not args.overwrite:
+            if output_file.exists() and not args.overwrite and not args.test:
                 with open(output_file, "r", encoding="utf-8") as f:
                     for line in f:
                         try:
@@ -558,11 +684,11 @@ def main():
             # ---- Load Tracks ----
             tracks_by_id = None
             timestamp_to_frame = {}
-            if args.use_tracks and args.tracks_path:
+            if args.tracks_path:
                 track_path = (
                     Path(args.tracks_path)
                     / Path(scene_name).stem
-                    / ("tracks" + ("_ego_centric" if (not args.global_coords and args.dataset_name == "nuscenes") else "") + ".json")
+                    / ("tracks" + ("_ego_centric" if args.dataset_name == "nuscenes" else "") + ".json")
                 )
                 with open(track_path, "r", encoding="utf-8") as f:
                     raw_tracks = json.load(f)
@@ -570,17 +696,21 @@ def main():
                 cleaned_tracks, timestamp_to_frame = preprocess_scene_tracks(raw_tracks, args.dataset_name)
                 tracks_by_id = {d["object_id"]: d for d in cleaned_tracks["tracks"]}
 
-            q_dist = distribute_by_ratio(q_ratios, num_frames * args.number_of_questions)
+            q_dist = distribute_by_ratio(q_ratios, num_frames * args.number_of_questions - (not args.no_init_q))
             pattern = r"\b\S*\.\w+_\d+\b"
 
             for frame_idx in tqdm(range(num_frames), desc=f"Frames for {scene_name}"):
+                # When using tracks, skip the first two frames where tracks are not yet available
+                if args.tracks_path is not None and frame_idx < 2:
+                    continue
+
                 frame_master_id = cam_json_files[ref_cam][frame_idx].stem
-                if frame_master_id in processed_frames:
+                if frame_master_id in processed_frames and not args.test:
                     continue
 
                 prefix = "Here is the list of objects detected in the scene from all cameras. Use them to generate the QA pairs:"
                 combined_scene_text = []
-                ego_poses = []
+                ego_poses_cams = []
                 for cam in cameras:
                     cam_dir = Path(args.yolo_path) / cam / scene_name
                     processed_json = cam_dir / "merged_processed.json"
@@ -603,41 +733,63 @@ def main():
                         frame=frame_stem,
                         frames_back=args.frames_back,
                         track_type=args.track_type,
-                        include_tracks=args.use_tracks,
+                        include_tracks=args.tracks_path is not None,
                         dataset_name=args.dataset_name,
                         global_coords=args.global_coords,
                     )
                     if cam_text:
                         combined_scene_text.extend(cam_text)
-                    
+
                     if ego_pos is not None:
-                        ego_poses.append(ego_pos)
+                        ego_poses_cams.append(ego_pos)
                 object_lines = [json.dumps(obj, separators=(",", ":")) for obj in combined_scene_text]
                 json_data = "[\n" + ",\n".join(object_lines) + "\n]"
-                if args.global_coords:
-                    if ego_poses:
-                        ego_pos = ego_poses[0]
-                        q = Quaternion(ego_pos[1])
-                        # Get the yaw angle in radians (pyquaternion returns yaw, pitch, roll)
-                        yaw_radians = q.yaw_pitch_roll[0]
-                        # Convert to degrees for the LLM (makes it much easier for the model to reason)
-                        yaw_degrees = round(np.degrees(yaw_radians), 2)
+
+                if ego_poses_cams:
+                    ego_poses = None
+                    for pos in ego_poses_cams:
+                        if len(pos) == args.frames_back:
+                            ego_poses = pos
+                            break
+                        elif pos is not None:
+                            ego_poses = pos
+
+                    if ego_poses is None:
+                        print(f"Warning: No ego positions found for {scene_name} frame {frame_idx}")
+                        continue
+                    if not args.global_coords:
+                        poses = [np.array(translation) - np.array(ego_poses[-1][0]) for translation, _ in ego_poses]
+                        poses = np.array([Quaternion(rotation[1]).inverse.rotate(pos) for pos, rotation in zip(poses, ego_poses)])
+                        prefix = f"\nEgo vehicle pos_history (x, y, z): {[np.round(pos, 3).tolist() for pos in poses]} \n" + prefix
+
+                    if args.global_coords:
                         prefix = (
-                            f"\nThe ego vehicle's position (x, y, z) is: {ego_pos[0]}\n"
-                            + f"Heading (Yaw): {yaw_degrees}° (0° is East/Global +X, 90° is North/Global +Y)\n"
+                            f"\nEgo vehicle pos_history (x, y, z): {[np.round(translation, 3).tolist() for translation, _ in ego_poses]} \n" + prefix
+                        )
+                        prefix = (
+                            f"Heading (Yaw): {[f'{round(np.degrees(Quaternion(rotation).yaw_pitch_roll[0]), 2)}°' for _, rotation in ego_poses]} (0° is East/Global +X, 90° is North/Global +Y)"
                             + prefix
                         )
-                    else:
-                        print(f"Warning: No ego positions found for {scene_name} frame {frame_idx}, but global_coords is enabled. Cannot proceed without ego position for global coordinates.")
-                        continue
+                else:
+                    print(f"Warning: No ego positions found for {scene_name} frame {frame_idx}")
+                    continue
                 final_scene_text = prefix + "\n" + json_data
 
                 # Create a deterministic seed based on the scene
                 rng = random.Random(f"{scene_name}_{frame_idx}")
 
-                questions = ["What are the important objects in the current scene?"] + random_permutation(
-                    q_dist, args.number_of_questions - 1, args.number_of_questions - 1, rng
-                )
+                # --- Test Mode Question Assignment ---
+                if args.test:
+                    frames_remaining = num_frames - frame_idx
+                    num_to_pop = math.ceil(len(test_question_pool) / frames_remaining) if frames_remaining > 0 else 0
+                    questions = test_question_pool[:num_to_pop]
+                    test_question_pool = test_question_pool[num_to_pop:]
+                    if len(questions) == 0:
+                        break
+                else:
+                    base = [] if args.no_init_q else [INIT_QUESTION]
+                    remaining = args.number_of_questions - len(base)
+                    questions = base + random_permutation(q_dist, remaining, remaining, rng)
 
                 scene_results = {}
                 used_objs = set()
@@ -649,15 +801,21 @@ def main():
                             objects=final_scene_text,
                             config_prompts=config_prompts,
                             config_prompts_fewshot=config_prompts_fewshot,
+                            config_prompts_answer_formatting=config_prompts_answer_formatting,
+                            enforce_formatting=args.answer_formatting,
                             directions=directions,
                             global_coords=args.global_coords,
-                            tracks=args.use_tracks,
+                            tracks=args.tracks_path is not None,
                             track_type=args.track_type,
                             dataset_name=args.dataset_name,
                         )
+
                         if used_objs and "<obj>" in q:
                             prompt += f"\nAvoid reusing: {', '.join(sorted(used_objs))}"
 
+                        # --- Print Prompt in Test Mode ---
+                        if args.test:
+                            print(f"\n\n{'=' * 70}\n[TEST MODE] Prompt for: {q}\n{'-' * 70}\n{prompt}\n{'=' * 70}\n")
                         messages = [{"role": "user", "content": prompt}]
                         _, content = responder.generate(messages)
                         try:
@@ -667,14 +825,23 @@ def main():
                             scene_results.update(parsed)
                             question_text = parsed[f"Question_{i}"]["question"]
                             used_objs.update(re.findall(pattern, question_text))
+                            if args.test:
+                                print("Next <obj> prompt will have:")
+                                print(f"\nAvoid reusing: {', '.join(sorted(used_objs))}")
                         except json.JSONDecodeError as e:
                             print(f"[Warning] JSON decode error for {scene_name} frame {frame_idx} question {i}: {e}\n{content}")
 
                 append_json_line(str(output_file), {frame_master_id: scene_results})
 
+            # --- Early Exit for Test Mode ---
+            if args.test:
+                print(f"\nTest mode finished processing folder '{scene_name}'. Exiting.")
+                break
+
         except Exception as e:
             print(f"❌ Error in [{scene_idx + 1}/{total_scenes}] {scene_name}: {e}")
             print(traceback.print_exc())
+
     print("Job complete.")
 
 

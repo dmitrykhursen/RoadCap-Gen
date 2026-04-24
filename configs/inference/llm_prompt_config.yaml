@@ -21,7 +21,7 @@ prompts:
     **CRITICAL RULE — REPLACE <obj> TOKENS EXACTLY**
 
     Every time the question template contains <obj>, replace it with:
-      <object_id, camera_name, cx, cy>
+      <object_id,camera_name,cx,cy>
 
     Where:
     - object_id = EXACT provided object name (example: car_4)
@@ -37,6 +37,8 @@ prompts:
     - Choose objects that make sense for the question.
 
     Apart from replacing <obj>, do NOT modify the question template in any way.
+    **Never add more objects than the template requires**
+    When referencing the object in the short_answer, include this tag
 
   no_obj: |
     Use the question exactly as provided without any modifications.  
@@ -53,13 +55,13 @@ prompts:
   answer_rules: |
     ### ANSWER RULES
     - Grounding: Your answer MUST be supported by the provided object list.
-    - Prioritization: Focus on vehicles, objects closer to the ego vehicle and objects in the path of the ego vehicle.
-    - Formatting: Do NOT use internal IDs (e.g., "car_0") in the answer outside of tags. Use descriptive phrases instead (e.g., "the car on the left").
+    - Prioritization: Focus mainly on vehicles. Secondly focus on pedestrians. Then objects close to the ego vehicle and objects in the path of the ego vehicle. Use objects that make sense for the question.
+    - Formatting: Do NOT use internal IDs (e.g., "car_0") in the answer outside of tags. Use descriptive phrases instead.
     - Output Format: You must output EXACTLY the following JSON structure and nothing else.
     {
         "question": "...", // MUST contain correctly formatted object tags
         "reasoning": "...", // MUST include consice spatial analysis
-        "short_answer": "..." // MUST be brief (yes/no or 1-2 sentences) dont add precise distances, just general spatial relationships
+        "short_answer": "..." // MUST be brief (yes/no or 1-2 sentences). USE ONLY QUALITATIVE SPATIAL TERMS RELATIVE TO THE EGO VEHICLE. NO NUMERIC DISTANCES OR UNITS
     }
 
   detected_objects_tracks: |
@@ -68,7 +70,7 @@ prompts:
     pos_history is taken from the previous frames (t-2, t-1) and the current frame (t-0)
     Data Schema: 
     {"id":"Camera_ObjectType","bbox":[x, y, width, height in px],"center":[cx, cy in px],"pos_history":[[x,y,z,d at t-2],[x,y,z,d at t-1],[x,y,z,d at t-0] in meters]}
-    *Note: If an object is new at t=0, pos_history will only contain one array: [x,y,z,d at t-0].*
+    *Note: If an object is new at t=0, pos_history will only contain one array: [x,y,z,d at t-0]*
 
   detected_objects: |
     ### DETECTED OBJECTS DATA
@@ -84,19 +86,19 @@ prompts:
     the position history is captured every 55 ms
 
   nuscenes_tracks_coords_m: |
-    3D Ego Vehicle Coordinates (nuScenes format: [x, y, z, distance in meters]):
+    3D Ego Vehicle Coordinates (nuScenes format: [x, y, z, d in meters]):
     - x > 0: forward (in front of ego), x < 0: backward
     - y > 0: left of ego, y < 0: right
     - z > 0: up, z < 0: down
-    - distance: Euclidean distance from ego vehicle
+    - d: Euclidean distance from ego vehicle
     the position history is captured roughly every 500 ms
 
   nuscenes_tracks_coords_global_m: |
-    3D Global Map Coordinates (nuScenes format: [x, y, z, distance in meters]):
+    3D Global Map Coordinates (nuScenes format: [x, y, z, d in meters]):
     - x: Fixed global map X-axis (points East), NOT relative to the car.
     - y: Fixed global map Y-axis (points North), NOT relative to the car.
     - z: Absolute elevation/height in the global map.
-    - distance: Euclidean distance from ego vehicle to the object.
+    - d: Euclidean distance from ego vehicle to the object.
     the position history is captured roughly every 500 ms
 
     Crucial Instruction: 
@@ -107,14 +109,38 @@ prompts:
     - bounding box [0, 1620, 1600, 428], midpoint [800, 1834]
     - always at bottom middle-left, partially visible, moving forward along the y axis in the image coordinates
 
+answer_formatting:
+  no_additional_info: |
+    Do not provide any additional information in the short_answer
   yes_no_questions: |
-    Only answer Yes. or No. Do not provide any additional information in the short answer
+    Only answer "Yes." or "No."
 
   multiple_choice_questions: |
-    Only answer with the provided letter corresponding to the correct option. Do not provide any additional information in the short answer.
+    Only answer with the provided letter corresponding to the correct option without interpunction. 
 
   multiple_parts: |
-    Keep all the provided question parts in the question and answer all parts in the reasoning and answer. Do not drop any part of the question
+    Keep all the provided question parts in the question. Answer all parts in the reasoning and short_answer. Do not drop any part of the question!
+
+  init_q: |
+    The short_answer must consist of exactly two sentences. The first sentence must describe each important object and its spatial position relative to the ego vehicle. The second sentence must begin exactly with "The IDs of these objects are " followed by a comma-separated list of the complete object tags (ie <object_id,camera_name,cx,cy>)
+
+  actions_probability: |
+    The answer must contain all three parts. Start with "The action is " and the most likely action. Then add few words of reasoning and provide the probability ("high" or "low") for that action
+
+  collison: |
+    Only aswer the action, that would cause a collision with the referenced object. 
+
+  actions_for_ego: |
+    Answer with comma separated actions. 
+
+  notice_three_obj: |
+    The short answer must contain six sentences in this structure: "Firstly, notice <obj>. The object is <action>, so the ego should <action>. Secondly, notice <obj>. The object is <action>, so the ego should <action>. Thirdly, notice <obj>. The object is <action>, so the ego should <action>." Replace the <obj> based on the previous instructions
+
+  most_possible_action: |
+    Only answer the action.
+
+  priority_of_objects: |
+    Answer a comma separated list of the objects
 
 fewshot:
   tracks_m: |
@@ -129,22 +155,18 @@ fewshot:
     Correct Example:
     Template:;
       Are <obj> and <obj> close to each other?
-    Objects:
-      pedestrian_0, middle [511.8, 981.5]
-      car_3, middle [1085.0, 929.0]
     Correct Output:
-      Are <pedestrian_0, CAM_FRONT, 511.8, 981.5> and <car_3, CAM_FRONT, 1085.0, 929.0> close to each other?
+      Are <pedestrian_0, CAM_FRONT, 511.8, 981.5> and <car_3, CAM_BACK, 1085.0, 929.0> close to each other?
     WRONG EXAMPLES — NEVER DO THESE
       "car_4"
       "<car_4>"
       "<car_4,1031.5,938.5>"
       "<car_4 CAM_FRONT 1031 938>"
-      Leaving <obj> unchanged
+      Leaving <obj> UNCHANGED
       Using the same object twice for different <obj> tokens
-      Removing CAM_FRONT
       Removing parentheses or commas
     If you output a question like:
-        "What actions could cause a collision with car_4?"
+        "What actions could cause a collision with <obj>?"
     YOU HAVE FAILED THE FORMAT.
 
   position: |
