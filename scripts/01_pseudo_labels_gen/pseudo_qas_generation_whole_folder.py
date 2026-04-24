@@ -28,6 +28,8 @@ except ImportError:
 
 INIT_QUESTION = "What are the important objects in the current scene? Those objects will be considered for the future reasoning and driving decision."
 
+INIT_NUM_OBJ_DIST = {3: 0.3352, 4: 0.2731, 5: 0.2149, 6: 0.1768}
+
 YES_NO_QUESTIONS = set(
     [
         "Would <obj> be in the moving direction of the ego vehicle?",
@@ -83,7 +85,7 @@ QUESTION_RULES = [
     (EGO_ACTIONS, ["actions_for_ego"]),
     (
         {INIT_QUESTION},
-        ["init_q"],
+        ["init_q_main"],
     ),
     (
         {"What actions could the ego vehicle take based on <obj>? Why take this action and what's the probability?"},
@@ -312,6 +314,14 @@ def add_formatting(parts: list, answer_formatting: Dict[str, str], q: str) -> li
         if q in question_set:
             for key in formatting_keys:
                 parts.append("\n" + answer_formatting[key])
+                if q == INIT_QUESTION and key == "init_q_main":
+                    selected_number = str(
+                        np.random.choice(
+                            a=list(INIT_NUM_OBJ_DIST.keys()),
+                            p=list(INIT_NUM_OBJ_DIST.values()),
+                        )
+                    )
+                    parts.append(answer_formatting["init_q_num_obj_" + selected_number])
 
     if q in MULTIPLE_PARTS_QUESTIONS:
         parts.append(answer_formatting["multiple_parts"])
@@ -564,7 +574,9 @@ def parse_args():
     parser.add_argument("--prompts_config", type=str, required=True)
     parser.add_argument("--dataset_name", type=str, default="nuscenes")
     parser.add_argument("--number_of_questions", type=int, default=15)
-    parser.add_argument("--frames_back", type=int, default=2)  # 2 back and the current so 3
+    parser.add_argument(
+        "--frames_back", type=int, default=5, help="Number of histroy frames to include in prompt. Always gets the current in addition"
+    )  # x back + the current so frames
     parser.add_argument("--tracks_path", type=str, default=None)
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing results")
     parser.add_argument("--no_init_q", action="store_true", help="Dont include the init question")
@@ -600,9 +612,10 @@ def main():
     # --- Test Mode Initialization ---
     test_question_pool = []
     if args.test:
-        target_questions = [entry["question"] for entry in ratio_data if entry.get("ratio_test", 0) > 0.5]
+        target_questions = []
+        # target_questions = [entry["question"] for entry in ratio_data if entry.get("ratio_test", 0) > 0.5]
         target_questions.append(INIT_QUESTION)
-        test_question_pool = target_questions * 4
+        test_question_pool = target_questions * 15
         rng_test = random.Random(42)  # fixed seed to ensure uniformity
         rng_test.shuffle(test_question_pool)
         print(f"\n[TEST MODE ENABLED] Selected {len(target_questions)} question types. Pool size: {len(test_question_pool)}.")
@@ -701,7 +714,7 @@ def main():
 
             for frame_idx in tqdm(range(num_frames), desc=f"Frames for {scene_name}"):
                 # When using tracks, skip the first two frames where tracks are not yet available
-                if args.tracks_path is not None and frame_idx < 2:
+                if args.tracks_path is not None and (frame_idx < 2 or (args.test and frame_idx < 15)):
                     continue
 
                 frame_master_id = cam_json_files[ref_cam][frame_idx].stem

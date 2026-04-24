@@ -67,9 +67,9 @@ prompts:
   detected_objects_tracks: |
     ### DETECTED OBJECTS DATA
     Use the exact question template provided without modifications.
-    pos_history is taken from the previous frames (t-2, t-1) and the current frame (t-0)
+    pos_history is taken from the previous frames (..., t-2, t-1) and the current frame (t-0)
     Data Schema: 
-    {"id":"Camera_ObjectType","bbox":[x, y, width, height in px],"center":[cx, cy in px],"pos_history":[[x,y,z,d at t-2],[x,y,z,d at t-1],[x,y,z,d at t-0] in meters]}
+    {"id":"Camera_ObjectType","bbox":[x, y, width, height in px],"center":[cx, cy in px],"pos_history":[..., [x,y,z,d at t-2],[x,y,z,d at t-1],[x,y,z,d at t-0] in meters]}
     *Note: If an object is new at t=0, pos_history will only contain one array: [x,y,z,d at t-0]*
 
   detected_objects: |
@@ -121,8 +121,16 @@ answer_formatting:
   multiple_parts: |
     Keep all the provided question parts in the question. Answer all parts in the reasoning and short_answer. Do not drop any part of the question!
 
-  init_q: |
-    The short_answer must consist of exactly two sentences. The first sentence must describe each important object and its spatial position relative to the ego vehicle. The second sentence must begin exactly with "The IDs of these objects are " followed by a comma-separated list of the complete object tags (ie <object_id,camera_name,cx,cy>)
+  init_q_main: |
+    The short_answer must consist of exactly two sentences. Fill up this template. ONLY replace the <tags>.
+  init_q_num_obj_3: |
+    There is a <description of the object> to the <relative position to the ego> of the ego vehicle, a <description of the object> to the <relative position to the ego> of the ego vehicle, and a <description of the object> to the <relative position to the ego> of the ego vehicle. The IDs of these objects are <obj>, <obj>, and <obj>.
+  init_q_num_obj_4: |
+    There is a <description of the object> to the <relative position to the ego> of the ego vehicle, a <description of the object> to the <relative position to the ego> of the ego vehicle, a <description of the object> to the <relative position to the ego> of the ego vehicle, and a <description of the object> to the <relative position to the ego> of the ego vehicle. The IDs of these objects are <obj>, <obj>, <obj>, and <obj>.
+  init_q_num_obj_5: |
+    There is a <description of the object> to the <relative position to the ego> of the ego vehicle, a <description of the object> to the <relative position to the ego> of the ego vehicle, a <description of the object> to the <relative position to the ego> of the ego vehicle, a <description of the object> to the <relative position to the ego> of the ego vehicle, and a <description of the object> to the <relative position to the ego> of the ego vehicle. The IDs of these objects are <obj>, <obj>, <obj>, <obj>, and <obj>.
+  init_q_num_obj_6: |
+    There is a <description of the object> to the <relative position to the ego> of the ego vehicle, a <description of the object> to the <relative position to the ego> of the ego vehicle, a <description of the object> to the <relative position to the ego> of the ego vehicle, a <description of the object> to the <relative position to the ego> of the ego vehicle, a <description of the object> to the <relative position to the ego> of the ego vehicle, and a <description of the object> to the <relative position to the ego> of the ego vehicle. The IDs of these objects are <obj>, <obj>, <obj>, <obj>, <obj>, and <obj>.
 
   actions_probability: |
     The answer must contain all three parts. Start with "The action is " and the most likely action. Then add few words of reasoning and provide the probability ("high" or "low") for that action
