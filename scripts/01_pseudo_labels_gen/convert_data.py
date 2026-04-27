@@ -5,6 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 import sys
 import re
+from itertools import count
 
 project_root = str(Path(__file__).resolve().parents[2])  # Adjust parents index if your script is deeper
 if project_root not in sys.path:
@@ -12,7 +13,7 @@ if project_root not in sys.path:
 from src.utils.qas_generation_helper import load_json
 
 
-PATTERN_OBJ_GENERAL = r"<[^>]*\w+_\d+,\s*[^,]+,\s*-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?>"
+PATTERN_OBJ_GENERAL = r"<[^,]+,\s*[^,]+,\s*-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?>"
 REPL_OBJ_GENERAL = r"<obj>"
 PATTERN_SELECT_OPTIONS = r"(.*?Please select the correct answer from the following options:).*"
 REPL_SELECT_OPTIONS = r"\1"
@@ -24,6 +25,8 @@ PATTERNS = [
     (PATTERN_POSITION, REPL_POSITION),
 ]
 COMPILED_PATTERNS = [(re.compile(p), r) for p, r in PATTERNS]
+
+PATTERN_OBJ_ID = re.compile(r"<([^,]+)(,[^>]+)>")
 
 ANSWER_VARIATIONS = {
     "ahead": ["going ahead", "go ahead", "moving forward", "move forward", "moving straight", "move straight", "straight ahead", "drive forward"],
@@ -120,7 +123,12 @@ def get_nuscenes_images(orig_jsons_path, scene, sample_id, root_img_paths) -> tu
     return images, not_found
 
 
-def process_file_nuscenes(folder: Path, input_path: Path, ids_images: dict, tags: dict, acc: bool) -> int:
+def sequential_replacer(counter, match):
+    # match.group(2) holds the rest of the tag (e.g., ",CAM_FRONT,1389.2,566.3")
+    return f"<c{next(counter)}{match.group(2)}>"
+
+
+def process_file_nuscenes(folder: Path, input_path: Path, ids_images: dict, tags: dict, acc: bool) -> tuple[int, int, int]:
     orig_jsons_path = "/scratch/project/eu-25-10/datasets/nuScenes_metadata/annotations_in_valeo_format/"
     root_img_paths = Path("/scratch/project/eu-25-10/datasets/nuScenes/samples/")
 
@@ -128,6 +136,8 @@ def process_file_nuscenes(folder: Path, input_path: Path, ids_images: dict, tags
     output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     broken = 0
+    broken_obj = 0
+    loc_QA = 0
     results = []
     with input_path.open("r", encoding="utf-8") as fin:
         for line in fin:
@@ -169,10 +179,27 @@ def process_file_nuscenes(folder: Path, input_path: Path, ids_images: dict, tags
 
                         question = q["question"]
                         answer = q["short_answer"]
+                        # TODO: if only one obj is in reasoning, we can substitute that to the q/a
+                        if "<obj>" in question or "<obj>" in answer:
+                            broken_obj += 1
+                            continue
+
                         question = question.replace(" side", "")
                         if "What are the important objects in the current scene?" in question:
+                            if "The IDs of these objects are" not in answer:
+                                if "The IDs are" in answer:
+                                    answer = answer.replace("The IDs are", "The IDs of these objects are")
+                                else:
+                                    broken += 1
+                                    # TODO: fix the wording if possible, there is ', and the IDs of these objects are'
+                                    print(80 * "-")
+                                    print(f"Question: {answer}")
+                                    print(80 * "-")
+                                    continue
+
                             if " Those objects will be considered for the future reasoning and driving decision." not in question:
                                 question += " Those objects will be considered for the future reasoning and driving decision."
+
                         if "What actions could the ego vehicle take based on" in question:
                             if any(word in answer.lower() for word in ["probability", "chance", "likelihood", "low", "high", "medium"]):
                                 if " Why take this action and what's the probability?" not in question:
@@ -226,7 +253,7 @@ def process_file_nuscenes(folder: Path, input_path: Path, ids_images: dict, tags
                                             concept_to_letter[direction] = letter
                                             break
 
-                                extracted_letter = ''
+                                extracted_letter = ""
                                 letter_matches_bracket = re.findall(r"(?:^|\s|\()([A-D])(?:[.)]|\s|$)", answer)
                                 letter_matches_option = re.findall(r"(?i)option\s+([a-d])", answer)
 
@@ -283,12 +310,12 @@ def process_file_nuscenes(folder: Path, input_path: Path, ids_images: dict, tags
                                 if "no" in answer.lower():
                                     answer = "No."
                                 if "following options" in question.lower():
-                                    answer = extracted_letter + '.' # type: ignore
-                                    
-                                    
-                                    # match = re.search(r"\b([A-D])\.", answer)
-                                    # answer = match.group(1) if match else answer
-
+                                    answer = extracted_letter  # type: ignore
+                        if acc:
+                            counter = count(1)
+                            answer = PATTERN_OBJ_ID.sub(lambda m: f"<c{next(counter)}{m.group(2)}>", answer)
+                            question = PATTERN_OBJ_ID.sub(lambda m: f"<c{next(counter)}{m.group(2)}>", question)
+                            
                         new_item = {
                             "id": f"{scene_id}_{frame_id}_{question_idx}_generated",
                             "image": images,
@@ -300,13 +327,14 @@ def process_file_nuscenes(folder: Path, input_path: Path, ids_images: dict, tags
                             "tag": tag,
                             "category": category,
                         }
-
+                        loc_QA += 1
                         results.append(new_item)
 
-        # with output_path.open("w", encoding="utf-8") as fout:
-        #     fout.write(json.dumps(results, indent=2, ensure_ascii=False))
-    print(f"Retarded count for {input_path.name}: {broken}")
-    return broken
+        with output_path.open("w", encoding="utf-8") as fout:
+            fout.write(json.dumps(results, indent=2, ensure_ascii=False))
+    print(f"Broken count for {input_path.name}: {broken}")
+    print(f"Broken obj count for {input_path.name}: {broken_obj}")
+    return broken, broken_obj, loc_QA
 
 
 def main():
@@ -319,14 +347,23 @@ def main():
     tags = load_json("data/local_splits/tags_for_generalized_qs.json")
     folder: Path = args.folder
     broken = 0
+    broken_obj = 0
+    num_qa = 0
     for jsonl_file in folder.rglob("*.jsonl"):
-        broken += process_file_nuscenes(folder, jsonl_file, ids_images, tags, args.acc)
+        b, bo, q = process_file_nuscenes(folder, jsonl_file, ids_images, tags, args.acc)
+        broken += b
+        num_qa += q
+        broken_obj += bo
 
     # for jsonl_file in folder.glob("*.jsonl"):
     #     process_file(jsonl_file)
     print(80 * "-")
-    print(f"Total QAs discarded: {broken}")
+    print(f"Total QAs discarded: {broken + broken_obj}")
     print(80 * "-")
+    print(f"QAs discarded cause of <obj>: {broken_obj}")
+    print(80 * "-")
+    print(f"Total QAs left: {num_qa}")
+    print(80 * "=")
 
 
 if __name__ == "__main__":

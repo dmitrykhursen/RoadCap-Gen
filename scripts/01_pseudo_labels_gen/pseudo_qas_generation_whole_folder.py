@@ -569,7 +569,7 @@ def parse_args():
     parser.add_argument("--thinking", action="store_true")
     parser.add_argument("--track_type", choices=["m", "px"], default="m")
     parser.add_argument("--yolo_path", type=str, required=True, help="Path to annotations/metadata")
-    parser.add_argument("--output_folder", type=str, default="data/nuscenes_tracks")
+    parser.add_argument("--output_folder", type=str, default="data")
     parser.add_argument("--qas_ratios", type=str, required=True)
     parser.add_argument("--prompts_config", type=str, required=True)
     parser.add_argument("--dataset_name", type=str, default="nuscenes")
@@ -641,17 +641,80 @@ def main():
     all_scenes = all_scenes[start_idx:end_idx]
     print(f"Filtering scenes to index range: [{start_idx}, {end_idx})")
     total_scenes = len(all_scenes)
+    
+    output_outer_dir = f"{args.output_folder}/{args.dataset_name}{'_tracks' if args.tracks_path else ''}{'_global' if args.global_coords else ''}{'_formatted' if args.answer_formatting else ''}"
+    idxs_to_skip = set()
+    for scene_idx, scene_name in enumerate(all_scenes):
+        if args.test:
+            output_dir = Path("data/prompt_testing")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / f"test_results_{exp_name}.jsonl"
+        else:
+            output_dir = Path(output_outer_dir) / scene_name
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / f"qas_{scene_name}_{exp_name}.jsonl"
+
+        try:
+            cam_json_files = {}
+            cam_files_lens = []
+            for cam in cameras:
+                cam_dir = Path(args.yolo_path) / cam / scene_name
+                jsons = sorted([f for f in cam_dir.glob("*.json") if "merged" not in f.name])
+                cam_json_files[cam] = jsons
+                cam_files_lens.append(len(jsons))
+
+            ref_cam = cameras[0]
+            if len(set(cam_files_lens)) != 1:
+                print(f"Warning: Different number of frames across cameras for {scene_name}. Numbers differ: {cam_files_lens}. Skipping.")
+                idxs_to_skip.add(scene_idx)
+                continue
+
+            num_frames = len(cam_json_files[ref_cam])
+            if num_frames == 0:
+                print(f"No frames found for {scene_name} in {ref_cam}. Skipping.")
+                idxs_to_skip.add(scene_idx)
+                continue
+
+            processed_frames = set()
+            if output_file.exists() and not args.overwrite and not args.test:
+                with open(output_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            processed_frames.update(json.loads(line.strip()).keys())
+                        except Exception:
+                            pass  # Skip corrupted lines
+
+                if len(processed_frames) >= num_frames:
+                    idxs_to_skip.add(scene_idx)
+                    print(f"[{scene_idx + 1}/{total_scenes}] Skipping: {scene_name} (Fully processed {len(processed_frames)}/{num_frames} frames)")
+                    continue
+                else:
+                    pass
+            else:
+                pass
+        except Exception as e:
+            print(f"Error processing {scene_name}: {e}")
+            continue
+
+    print("Idxs to skip: ", idxs_to_skip)
+    if len(idxs_to_skip) == total_scenes:
+        print("No scenes left to process. Exiting.")
+        exit()
 
     responder = ModelRespondervllm(args.model, thinking=args.thinking)
 
     for scene_idx, scene_name in tqdm(enumerate(all_scenes), total=total_scenes):
+        if scene_idx in idxs_to_skip:
+            print(f"[{scene_idx + 1}/{total_scenes}] Skipping: {scene_name}")
+            continue
+
         # --- Output Directory Parsing ---
         if args.test:
             output_dir = Path("data/prompt_testing")
             output_dir.mkdir(parents=True, exist_ok=True)
             output_file = output_dir / f"test_results_{exp_name}.jsonl"
         else:
-            output_dir = Path(args.output_folder) / scene_name
+            output_dir = Path(output_outer_dir) / scene_name
             output_dir.mkdir(parents=True, exist_ok=True)
             output_file = output_dir / f"qas_{scene_name}_{exp_name}.jsonl"
 
@@ -666,30 +729,15 @@ def main():
                 cam_files_lens.append(len(jsons))
 
             ref_cam = cameras[0]
-            if len(set(cam_files_lens)) != 1:
-                print(f"Warning: Different number of frames across cameras for {scene_name}. Numbers differ: {cam_files_lens}. Skipping.")
-                continue
-
             num_frames = len(cam_json_files[ref_cam])
-            if num_frames == 0:
-                print(f"No frames found for {scene_name} in {ref_cam}. Skipping.")
-                continue
-
-            # Check for existing progress to resume mid-scene
             processed_frames = set()
             if output_file.exists() and not args.overwrite and not args.test:
                 with open(output_file, "r", encoding="utf-8") as f:
                     for line in f:
                         try:
-                            data = json.loads(line.strip())
-                            processed_frames.update(data.keys())
+                            processed_frames.update(json.loads(line.strip()).keys())
                         except Exception:
                             pass  # Skip corrupted lines
-
-                if len(processed_frames) >= num_frames:
-                    print(f"[{scene_idx + 1}/{total_scenes}] Skipping: {scene_name} (Fully processed {len(processed_frames)}/{num_frames} frames)")
-                    continue
-                else:
                     print(f"[{scene_idx + 1}/{total_scenes}] Resuming: {scene_name} ({len(processed_frames)}/{num_frames} frames done)")
             else:
                 print(f"[{scene_idx + 1}/{total_scenes}] Processing: {scene_name}")
