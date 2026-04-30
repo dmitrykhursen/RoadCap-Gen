@@ -13,3 +13,4 @@ data/*
 wandb/*
 .vscode/*
 logs/*
+nuscenes_data/*
