@@ -1,0 +1,168 @@
+[
+    {
+        "category": "Orientation",
+        "description": "Understanding the heading of objects relative to the ego vehicle's coordinate system.",
+        "templates": [
+            {
+                "question": "Where is <obj> facing?",
+                "answer_type": "categorical",
+                "possible_answers": [
+                    "towards ego",
+                    "away from ego",
+                    "left",
+                    "right",
+                    "diagonally towards",
+                    "diagonally away"
+                ]
+            },
+            {
+                "question": "Is <obj> facing <direction>?",
+                "answer_type": "binary",
+                "possible_answers": [
+                    "Yes.",
+                    "No."
+                ]
+            },
+            {
+                "question": "Are <obj1> and <obj2> facing the same direction?",
+                "answer_type": "binary",
+                "possible_answers": [
+                    "Yes.",
+                    "No."
+                ]
+            }
+        ]
+    },
+    {
+        "category": "Relative Position",
+        "description": "Understanding 2D and 3D spatial arrangements between multiple objects in the scene.",
+        "templates": [
+            {
+                "question": "Where is <obj1> relative to <obj2>?",
+                "answer_type": "categorical",
+                "possible_answers": [
+                    "left",
+                    "right",
+                    "in front",
+                    "behind",
+                    "above",
+                    "below"
+                ]
+            },
+            {
+                "question": "Is <obj1> <relation> of <obj2>?",
+                "answer_type": "binary",
+                "possible_answers": [
+                    "Yes.",
+                    "No."
+                ]
+            },
+        ]
+    },
+    {
+        "category": "Depth and Distance",
+        "description": "Forcing the model to infer 3D depth, scale, and distance from perspective cues.",
+        "templates": [
+            {
+                "question": "Which object is closer to the ego vehicle, <obj1> or <obj2>?",
+                "answer_type": "categorical",
+                "possible_answers": [
+                    "<obj1>",
+                    "<obj2>",
+                    "equally distant"
+                ]
+            },
+            {
+                "question": "Is <obj1> closer to the ego vehicle than <obj2>?",
+                "answer_type": "binary",
+                "possible_answers": [
+                    "Yes.",
+                    "No."
+                ]
+            },
+            {
+                "question": "Is <obj1> farther away from the ego vehicle than <obj2>?",
+                "answer_type": "binary",
+                "possible_answers": [
+                    "Yes.",
+                    "No."
+                ]
+            },
+        ]
+    },
+    {
+        "note": "dont think we have data for this",
+        "category": "Lane Topology and Ground Plane",
+        "description": "Grounding objects to the drivable surface and road structure.",
+        "templates": [
+            {
+                "question": "Which lane is <obj> occupying relative to the ego vehicle?",
+                "answer_type": "categorical",
+                "possible_answers": [
+                    "same lane",
+                    "left adjacent lane",
+                    "right adjacent lane",
+                    "opposing lane",
+                    "intersecting path",
+                    "off-road/sidewalk"
+                ]
+            },
+            {
+                "question": "Is <obj> in the ego vehicle's direct path?",
+                "answer_type": "binary",
+                "possible_answers": [
+                    "Yes.",
+                    "No."
+                ]
+            },
+            {
+                "question": "Is <obj> located on the drivable road surface?",
+                "answer_type": "binary",
+                "possible_answers": [
+                    "Yes.",
+                    "No."
+                ]
+            },
+            {
+                "question": "Is <obj1> in the same lane as <obj2>?",
+                "answer_type": "binary",
+                "possible_answers": [
+                    "Yes.",
+                    "No."
+                ]
+            }
+        ]
+    },
+    {
+        "note": "this one is weird"
+        "category": "Occlusion and Visibility",
+        "description": "Testing the model's understanding of 3D layering and obstructed lines of sight.",
+        "templates": [
+            {
+                "question": "Is <obj1> partially occluding <obj2>?",
+                "answer_type": "binary",
+                "possible_answers": [
+                    "Yes.",
+                    "No."
+                ]
+            },
+            {
+                "question": "What is the visibility status of <obj>?",
+                "answer_type": "categorical",
+                "possible_answers": [
+                    "fully visible",
+                    "partially occluded",
+                    "truncated (at image edge)"
+                ]
+            },
+            {
+                "question": "Which object is obstructing the view of <obj1>?",
+                "answer_type": "entity_extraction",
+                "possible_answers": [
+                    "<obj2>",
+                    "none"
+                ]
+            }
+        ]
+    }
+]
